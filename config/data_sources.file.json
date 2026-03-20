@@ -1,0 +1,46 @@
+[
+  {
+    "provider_id": "macro_file",
+    "data_domain": "macro_prices",
+    "mode": "primary",
+    "provider_kind": "file",
+    "priority": 1,
+    "file_path": "config/file_snapshot_example.json",
+    "enabled": true,
+    "latency_hours": 1.0,
+    "field_completeness": 0.95
+  },
+  {
+    "provider_id": "market_file",
+    "data_domain": "market_breadth",
+    "mode": "primary",
+    "provider_kind": "file",
+    "priority": 1,
+    "file_path": "config/file_snapshot_example.json",
+    "enabled": true,
+    "latency_hours": 1.0,
+    "field_completeness": 0.95
+  },
+  {
+    "provider_id": "sector_file",
+    "data_domain": "sector_signals",
+    "mode": "primary",
+    "provider_kind": "file",
+    "priority": 1,
+    "file_path": "config/file_snapshot_example.json",
+    "enabled": true,
+    "latency_hours": 2.0,
+    "field_completeness": 0.95
+  },
+  {
+    "provider_id": "filing_file",
+    "data_domain": "filing_metrics",
+    "mode": "primary",
+    "provider_kind": "file",
+    "priority": 1,
+    "file_path": "config/file_snapshot_example.json",
+    "enabled": true,
+    "latency_hours": 2.0,
+    "field_completeness": 0.95
+  }
+]

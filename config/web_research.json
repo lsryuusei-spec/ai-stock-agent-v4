@@ -1,0 +1,9 @@
+[
+  {
+    "provider_id": "web_mock",
+    "provider_kind": "mock",
+    "enabled": true,
+    "max_results": 3,
+    "static_keywords": ["earnings follow-up", "capacity update", "AI demand"]
+  }
+]

@@ -1,0 +1,437 @@
+from __future__ import annotations
+
+from datetime import date
+
+from .models import Bucket, CurrentRoute, EntityProfile, ResearchPoolState, UniverseState
+from .scoring import make_new_company_state
+
+
+def build_demo_universe() -> UniverseState:
+    entities = [
+        EntityProfile(
+            entity_id="nvda_us",
+            ticker="NVDA",
+            company_name="NVIDIA",
+            sector="Semiconductor",
+            market_cap=2850,
+            liquidity_score=92,
+            info_score=93,
+            tradability_score=96,
+            base_quality=94,
+            industry_position_score=95,
+            macro_alignment_score=92,
+            valuation_score=58,
+            catalyst_score=90,
+            risk_penalty=34,
+            evidence_freshness_days=6,
+            active_factor_exposures=["ai_compute", "datacenter"],
+        ),
+        EntityProfile(
+            entity_id="amd_us",
+            ticker="AMD",
+            company_name="AMD",
+            sector="Semiconductor",
+            market_cap=365,
+            liquidity_score=90,
+            info_score=88,
+            tradability_score=92,
+            base_quality=82,
+            industry_position_score=84,
+            macro_alignment_score=88,
+            valuation_score=70,
+            catalyst_score=78,
+            risk_penalty=38,
+            evidence_freshness_days=9,
+            active_factor_exposures=["ai_compute", "pc_cycle"],
+        ),
+        EntityProfile(
+            entity_id="tsm_us",
+            ticker="TSM",
+            company_name="TSMC ADR",
+            sector="Semiconductor",
+            market_cap=820,
+            liquidity_score=85,
+            info_score=84,
+            tradability_score=88,
+            base_quality=91,
+            industry_position_score=96,
+            macro_alignment_score=82,
+            valuation_score=66,
+            catalyst_score=74,
+            risk_penalty=28,
+            evidence_freshness_days=12,
+            active_factor_exposures=["foundry", "ai_compute"],
+        ),
+        EntityProfile(
+            entity_id="smci_us",
+            ticker="SMCI",
+            company_name="Super Micro Computer",
+            sector="Hardware",
+            market_cap=52,
+            liquidity_score=80,
+            info_score=72,
+            tradability_score=84,
+            base_quality=66,
+            industry_position_score=70,
+            macro_alignment_score=80,
+            valuation_score=76,
+            catalyst_score=72,
+            risk_penalty=52,
+            evidence_freshness_days=11,
+            active_factor_exposures=["ai_server"],
+        ),
+        EntityProfile(
+            entity_id="arm_us",
+            ticker="ARM",
+            company_name="Arm Holdings",
+            sector="Semiconductor IP",
+            market_cap=138,
+            liquidity_score=76,
+            info_score=74,
+            tradability_score=78,
+            base_quality=72,
+            industry_position_score=77,
+            macro_alignment_score=83,
+            valuation_score=61,
+            catalyst_score=68,
+            risk_penalty=44,
+            evidence_freshness_days=14,
+            active_factor_exposures=["edge_ai", "ip_royalty"],
+        ),
+        EntityProfile(
+            entity_id="asml_us",
+            ticker="ASML",
+            company_name="ASML ADR",
+            sector="Semiconductor Equipment",
+            market_cap=395,
+            liquidity_score=79,
+            info_score=86,
+            tradability_score=82,
+            base_quality=89,
+            industry_position_score=94,
+            macro_alignment_score=79,
+            valuation_score=54,
+            catalyst_score=63,
+            risk_penalty=24,
+            evidence_freshness_days=18,
+            active_factor_exposures=["advanced_nodes", "capex_cycle"],
+        ),
+    ]
+    return UniverseState(
+        universe_id="us_macro_ai",
+        market="US",
+        effective_date=date.today(),
+        eligible_entities=entities,
+        entity_mapping_version="entity_map_v1",
+        universe_rules_version="universe_rules_v1",
+    )
+
+
+def build_demo_pool() -> tuple[ResearchPoolState, list]:
+    universe = build_demo_universe()
+    entity_map = {entity.entity_id: entity for entity in universe.eligible_entities}
+    companies = [
+        make_new_company_state(entity_map["nvda_us"], Bucket.CORE_TRACKING, CurrentRoute.INCUMBENT_REVIEW),
+        make_new_company_state(entity_map["tsm_us"], Bucket.SECONDARY_CANDIDATES, CurrentRoute.INCUMBENT_REVIEW),
+        make_new_company_state(entity_map["smci_us"], Bucket.HIGH_BETA_WATCH, CurrentRoute.INCUMBENT_REVIEW),
+    ]
+    pool = ResearchPoolState(
+        pool_id="us_macro_ai_pool",
+        market="US",
+        current_pool_members=["nvda_us", "tsm_us", "smci_us"],
+        shadow_watch_members=[],
+        archived_members=[],
+    )
+    return pool, companies
+
+
+def build_cn_demo_universe() -> UniverseState:
+    entities = [
+        EntityProfile(
+            entity_id="smic_cn",
+            ticker="688981.SH",
+            company_name="SMIC",
+            sector="Foundry",
+            market_cap=420,
+            liquidity_score=84,
+            info_score=82,
+            tradability_score=83,
+            base_quality=80,
+            industry_position_score=88,
+            macro_alignment_score=86,
+            valuation_score=62,
+            catalyst_score=79,
+            risk_penalty=36,
+            evidence_freshness_days=7,
+            active_factor_exposures=["foundry", "advanced_nodes"],
+        ),
+        EntityProfile(
+            entity_id="zte_cn",
+            ticker="000063.SZ",
+            company_name="ZTE",
+            sector="Telecom Equipment",
+            market_cap=165,
+            liquidity_score=87,
+            info_score=81,
+            tradability_score=86,
+            base_quality=76,
+            industry_position_score=79,
+            macro_alignment_score=84,
+            valuation_score=72,
+            catalyst_score=74,
+            risk_penalty=34,
+            evidence_freshness_days=10,
+            active_factor_exposures=["datacenter", "networking"],
+        ),
+        EntityProfile(
+            entity_id="zhongji_cn",
+            ticker="300308.SZ",
+            company_name="Zhongji Innolight",
+            sector="Optical Module",
+            market_cap=145,
+            liquidity_score=82,
+            info_score=78,
+            tradability_score=81,
+            base_quality=79,
+            industry_position_score=85,
+            macro_alignment_score=90,
+            valuation_score=64,
+            catalyst_score=83,
+            risk_penalty=41,
+            evidence_freshness_days=8,
+            active_factor_exposures=["ai_server", "optical_interconnect"],
+        ),
+        EntityProfile(
+            entity_id="eoptolink_cn",
+            ticker="300502.SZ",
+            company_name="Eoptolink",
+            sector="Optical Module",
+            market_cap=132,
+            liquidity_score=78,
+            info_score=75,
+            tradability_score=79,
+            base_quality=77,
+            industry_position_score=82,
+            macro_alignment_score=89,
+            valuation_score=61,
+            catalyst_score=80,
+            risk_penalty=43,
+            evidence_freshness_days=9,
+            active_factor_exposures=["ai_server", "optical_interconnect"],
+        ),
+        EntityProfile(
+            entity_id="cambricon_cn",
+            ticker="688256.SH",
+            company_name="Cambricon",
+            sector="AI Chip",
+            market_cap=250,
+            liquidity_score=74,
+            info_score=77,
+            tradability_score=76,
+            base_quality=69,
+            industry_position_score=76,
+            macro_alignment_score=92,
+            valuation_score=48,
+            catalyst_score=86,
+            risk_penalty=56,
+            evidence_freshness_days=12,
+            active_factor_exposures=["ai_compute", "domestic_substitution"],
+        ),
+        EntityProfile(
+            entity_id="sugon_cn",
+            ticker="603019.SH",
+            company_name="Sugon",
+            sector="Server",
+            market_cap=98,
+            liquidity_score=76,
+            info_score=73,
+            tradability_score=75,
+            base_quality=71,
+            industry_position_score=74,
+            macro_alignment_score=85,
+            valuation_score=66,
+            catalyst_score=72,
+            risk_penalty=46,
+            evidence_freshness_days=11,
+            active_factor_exposures=["ai_server", "datacenter"],
+        ),
+    ]
+    return UniverseState(
+        universe_id="cn_macro_ai",
+        market="CN",
+        effective_date=date.today(),
+        eligible_entities=entities,
+        entity_mapping_version="entity_map_v1_cn",
+        universe_rules_version="universe_rules_v1_cn",
+    )
+
+
+def build_cn_demo_pool() -> tuple[ResearchPoolState, list]:
+    universe = build_cn_demo_universe()
+    entity_map = {entity.entity_id: entity for entity in universe.eligible_entities}
+    companies = [
+        make_new_company_state(entity_map["smic_cn"], Bucket.CORE_TRACKING, CurrentRoute.INCUMBENT_REVIEW),
+        make_new_company_state(entity_map["zte_cn"], Bucket.SECONDARY_CANDIDATES, CurrentRoute.INCUMBENT_REVIEW),
+        make_new_company_state(entity_map["zhongji_cn"], Bucket.HIGH_BETA_WATCH, CurrentRoute.INCUMBENT_REVIEW),
+    ]
+    pool = ResearchPoolState(
+        pool_id="cn_macro_ai_pool",
+        market="CN",
+        current_pool_members=["smic_cn", "zte_cn", "zhongji_cn"],
+        shadow_watch_members=[],
+        archived_members=[],
+    )
+    return pool, companies
+
+
+def build_hk_demo_universe() -> UniverseState:
+    entities = [
+        EntityProfile(
+            entity_id="tencent_hk",
+            ticker="0700.HK",
+            company_name="Tencent",
+            sector="Platform",
+            market_cap=3300,
+            liquidity_score=91,
+            info_score=89,
+            tradability_score=90,
+            base_quality=88,
+            industry_position_score=90,
+            macro_alignment_score=80,
+            valuation_score=63,
+            catalyst_score=76,
+            risk_penalty=30,
+            evidence_freshness_days=6,
+            active_factor_exposures=["cloud", "ai_application"],
+        ),
+        EntityProfile(
+            entity_id="smic_hk",
+            ticker="0981.HK",
+            company_name="SMIC HK",
+            sector="Foundry",
+            market_cap=190,
+            liquidity_score=86,
+            info_score=82,
+            tradability_score=84,
+            base_quality=79,
+            industry_position_score=87,
+            macro_alignment_score=88,
+            valuation_score=60,
+            catalyst_score=81,
+            risk_penalty=37,
+            evidence_freshness_days=7,
+            active_factor_exposures=["foundry", "domestic_substitution"],
+        ),
+        EntityProfile(
+            entity_id="xiaomi_hk",
+            ticker="1810.HK",
+            company_name="Xiaomi",
+            sector="Consumer Electronics",
+            market_cap=540,
+            liquidity_score=89,
+            info_score=84,
+            tradability_score=87,
+            base_quality=78,
+            industry_position_score=81,
+            macro_alignment_score=77,
+            valuation_score=68,
+            catalyst_score=73,
+            risk_penalty=35,
+            evidence_freshness_days=9,
+            active_factor_exposures=["edge_ai", "device_cycle"],
+        ),
+        EntityProfile(
+            entity_id="alibaba_hk",
+            ticker="9988.HK",
+            company_name="Alibaba",
+            sector="Platform",
+            market_cap=1700,
+            liquidity_score=90,
+            info_score=87,
+            tradability_score=89,
+            base_quality=82,
+            industry_position_score=85,
+            macro_alignment_score=78,
+            valuation_score=71,
+            catalyst_score=72,
+            risk_penalty=34,
+            evidence_freshness_days=8,
+            active_factor_exposures=["cloud", "ai_application"],
+        ),
+        EntityProfile(
+            entity_id="lenovo_hk",
+            ticker="0992.HK",
+            company_name="Lenovo Group",
+            sector="Hardware",
+            market_cap=148,
+            liquidity_score=80,
+            info_score=75,
+            tradability_score=81,
+            base_quality=74,
+            industry_position_score=77,
+            macro_alignment_score=82,
+            valuation_score=75,
+            catalyst_score=69,
+            risk_penalty=38,
+            evidence_freshness_days=11,
+            active_factor_exposures=["pc_cycle", "edge_ai"],
+        ),
+        EntityProfile(
+            entity_id="asmpt_hk",
+            ticker="0522.HK",
+            company_name="ASMPT",
+            sector="Semiconductor Equipment",
+            market_cap=52,
+            liquidity_score=73,
+            info_score=72,
+            tradability_score=74,
+            base_quality=76,
+            industry_position_score=83,
+            macro_alignment_score=84,
+            valuation_score=58,
+            catalyst_score=67,
+            risk_penalty=42,
+            evidence_freshness_days=12,
+            active_factor_exposures=["advanced_nodes", "capex_cycle"],
+        ),
+    ]
+    return UniverseState(
+        universe_id="hk_macro_ai",
+        market="HK",
+        effective_date=date.today(),
+        eligible_entities=entities,
+        entity_mapping_version="entity_map_v1_hk",
+        universe_rules_version="universe_rules_v1_hk",
+    )
+
+
+def build_hk_demo_pool() -> tuple[ResearchPoolState, list]:
+    universe = build_hk_demo_universe()
+    entity_map = {entity.entity_id: entity for entity in universe.eligible_entities}
+    companies = [
+        make_new_company_state(entity_map["tencent_hk"], Bucket.CORE_TRACKING, CurrentRoute.INCUMBENT_REVIEW),
+        make_new_company_state(entity_map["smic_hk"], Bucket.SECONDARY_CANDIDATES, CurrentRoute.INCUMBENT_REVIEW),
+        make_new_company_state(entity_map["xiaomi_hk"], Bucket.HIGH_BETA_WATCH, CurrentRoute.INCUMBENT_REVIEW),
+    ]
+    pool = ResearchPoolState(
+        pool_id="hk_macro_ai_pool",
+        market="HK",
+        current_pool_members=["tencent_hk", "smic_hk", "xiaomi_hk"],
+        shadow_watch_members=[],
+        archived_members=[],
+    )
+    return pool, companies
+
+
+def build_all_demo_sets() -> list[tuple[UniverseState, ResearchPoolState, list]]:
+    us_universe = build_demo_universe()
+    us_pool, us_companies = build_demo_pool()
+    cn_universe = build_cn_demo_universe()
+    cn_pool, cn_companies = build_cn_demo_pool()
+    hk_universe = build_hk_demo_universe()
+    hk_pool, hk_companies = build_hk_demo_pool()
+    return [
+        (us_universe, us_pool, us_companies),
+        (cn_universe, cn_pool, cn_companies),
+        (hk_universe, hk_pool, hk_companies),
+    ]

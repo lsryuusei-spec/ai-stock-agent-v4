@@ -1,0 +1,18 @@
+[
+  {
+    "provider_id": "web_akshare",
+    "provider_kind": "akshare",
+    "enabled": true,
+    "max_results": 4
+  },
+  {
+    "provider_id": "web_mock_backup",
+    "provider_kind": "mock",
+    "enabled": true,
+    "max_results": 2,
+    "static_keywords": [
+      "announcement follow-up",
+      "AI demand check"
+    ]
+  }
+]

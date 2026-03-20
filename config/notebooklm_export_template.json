@@ -1,0 +1,40 @@
+{
+  "documents": [
+    {
+      "title": "China macro weekly",
+      "topic_key": "china_macro_weekly",
+      "layer_hint": "macro",
+      "source_name": "notebooklm_curated",
+      "source_type": "notebooklm_export",
+      "region": "cn",
+      "document_type": "macro_note",
+      "published_at": "2026-03-14T09:00:00Z",
+      "tags": ["china_macro", "policy", "liquidity"],
+      "content": "Paste the cleaned NotebookLM summary here. Keep one document focused on one topic, such as macro, crowding, or principle."
+    },
+    {
+      "title": "A-share crowding monitor",
+      "topic_key": "a_share_crowding_monitor",
+      "layer_hint": "consensus",
+      "source_name": "notebooklm_curated",
+      "source_type": "notebooklm_export",
+      "region": "cn",
+      "document_type": "consensus_note",
+      "published_at": "2026-03-14T09:00:00Z",
+      "tags": ["a_share", "crowding", "ai"],
+      "content": "Paste the NotebookLM output that summarizes mainstream positioning and expectation risk."
+    },
+    {
+      "title": "Principle discipline note",
+      "topic_key": "principle_discipline_note",
+      "layer_hint": "principle",
+      "source_name": "notebooklm_curated",
+      "source_type": "notebooklm_export",
+      "region": "cn",
+      "document_type": "principle_note",
+      "published_at": "2026-03-14T09:00:00Z",
+      "tags": ["principle", "risk", "valuation"],
+      "content": "Paste the NotebookLM output that captures your risk and valuation discipline in natural language."
+    }
+  ]
+}

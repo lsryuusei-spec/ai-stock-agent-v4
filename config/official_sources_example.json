@@ -1,0 +1,72 @@
+{
+  "macro_theme": [
+    {
+      "title": "HKEX market structure update",
+      "snippet": "Exchange disclosure confirms infrastructure filing timetable.",
+      "url": "https://www.hkex.com.hk/News/Market-Update",
+      "source_name": "HKEX",
+      "published_at": "2026-03-10T08:00:00Z",
+      "relevance_score": 0.82,
+      "evidence_type": "official_market_notice"
+    }
+  ],
+  "entities": {
+    "smic_cn": [
+      {
+        "title": "SMIC capacity expansion disclosure",
+        "snippet": "CNINFO filing outlines the latest capital spending and capacity cadence.",
+        "url": "https://www.cninfo.com.cn/new/disclosure/stock?stockCode=688981",
+        "source_name": "CNINFO",
+        "published_at": "2026-03-10T09:30:00Z",
+        "relevance_score": 0.9,
+        "evidence_type": "official_disclosure"
+      }
+    ],
+    "688981.SH": [
+      {
+        "title": "SMIC investor relations capacity update",
+        "snippet": "Investor relations page confirms advanced-node capacity cadence.",
+        "url": "https://investor.example.com/smic/capacity-update",
+        "source_name": "SMIC IR",
+        "published_at": "2026-03-09T12:00:00Z",
+        "relevance_score": 0.84,
+        "evidence_type": "official_ir"
+      }
+    ],
+    "tencent_hk": [
+      {
+        "title": "Tencent quarterly operations update",
+        "snippet": "HKEXnews filing refreshes operating cadence and capital allocation disclosures.",
+        "url": "https://www.hkexnews.hk/listedco/listconews/sehk/2026/0310/example.pdf",
+        "source_name": "HKEXnews",
+        "published_at": "2026-03-10T07:00:00Z",
+        "relevance_score": 0.88,
+        "evidence_type": "official_disclosure"
+      }
+    ]
+  },
+  "markets": {
+    "cn": [
+      {
+        "title": "SSE disclosure rule update",
+        "snippet": "The exchange updated disclosure requirements for technology issuers.",
+        "url": "https://www.sse.com.cn/disclosure/rules",
+        "source_name": "SSE",
+        "published_at": "2026-03-08T09:00:00Z",
+        "relevance_score": 0.76,
+        "evidence_type": "official_market_notice"
+      }
+    ],
+    "hk": [
+      {
+        "title": "HKEXnews filing calendar notice",
+        "snippet": "Exchange disclosure calendar received an official update.",
+        "url": "https://www.hkexnews.hk/reports/calendar",
+        "source_name": "HKEXnews",
+        "published_at": "2026-03-08T08:00:00Z",
+        "relevance_score": 0.76,
+        "evidence_type": "official_market_notice"
+      }
+    ]
+  }
+}

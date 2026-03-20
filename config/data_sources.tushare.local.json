@@ -1,0 +1,72 @@
+[
+  {
+    "provider_id": "macro_primary",
+    "data_domain": "macro_prices",
+    "mode": "primary",
+    "provider_kind": "mock",
+    "priority": 1,
+    "enabled": true,
+    "latency_hours": 2.0,
+    "field_completeness": 0.96
+  },
+  {
+    "provider_id": "a_share_breadth_tushare",
+    "data_domain": "market_breadth",
+    "mode": "primary",
+    "provider_kind": "tushare",
+    "priority": 1,
+    "enabled": true,
+    "auth_env_var": "TUSHARE_TOKEN",
+    "latency_hours": 4.0,
+    "field_completeness": 0.92,
+    "provider_options": {
+      "market": "cn",
+      "breadth_api": "daily_proxy",
+      "exchange": "SSE"
+    }
+  },
+  {
+    "provider_id": "market_breadth_backup",
+    "data_domain": "market_breadth",
+    "mode": "fallback",
+    "provider_kind": "mock",
+    "priority": 2,
+    "enabled": true,
+    "latency_hours": 4.0,
+    "field_completeness": 0.82
+  },
+  {
+    "provider_id": "filing_tushare_cn",
+    "data_domain": "filing_metrics",
+    "mode": "primary",
+    "provider_kind": "tushare",
+    "priority": 1,
+    "enabled": true,
+    "auth_env_var": "TUSHARE_TOKEN",
+    "latency_hours": 8.0,
+    "field_completeness": 0.9,
+    "provider_options": {
+      "market": "cn"
+    }
+  },
+  {
+    "provider_id": "filing_backup",
+    "data_domain": "filing_metrics",
+    "mode": "fallback",
+    "provider_kind": "mock",
+    "priority": 2,
+    "enabled": true,
+    "latency_hours": 8.0,
+    "field_completeness": 0.8
+  },
+  {
+    "provider_id": "sector_internal",
+    "data_domain": "sector_signals",
+    "mode": "primary",
+    "provider_kind": "mock",
+    "priority": 1,
+    "enabled": true,
+    "latency_hours": 4.0,
+    "field_completeness": 0.91
+  }
+]

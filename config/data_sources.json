@@ -1,0 +1,62 @@
+[
+  {
+    "provider_id": "macro_primary",
+    "data_domain": "macro_prices",
+    "mode": "primary",
+    "provider_kind": "mock",
+    "priority": 1,
+    "enabled": true,
+    "latency_hours": 2.0,
+    "field_completeness": 0.96
+  },
+  {
+    "provider_id": "macro_backup",
+    "data_domain": "macro_prices",
+    "mode": "fallback",
+    "provider_kind": "mock",
+    "priority": 2,
+    "enabled": true,
+    "latency_hours": 5.0,
+    "field_completeness": 0.82
+  },
+  {
+    "provider_id": "market_internal",
+    "data_domain": "market_breadth",
+    "mode": "primary",
+    "provider_kind": "mock",
+    "priority": 1,
+    "enabled": true,
+    "latency_hours": 1.0,
+    "field_completeness": 0.95
+  },
+  {
+    "provider_id": "sector_internal",
+    "data_domain": "sector_signals",
+    "mode": "primary",
+    "provider_kind": "mock",
+    "priority": 1,
+    "enabled": true,
+    "latency_hours": 4.0,
+    "field_completeness": 0.91
+  },
+  {
+    "provider_id": "filing_primary",
+    "data_domain": "filing_metrics",
+    "mode": "primary",
+    "provider_kind": "mock",
+    "priority": 1,
+    "enabled": true,
+    "latency_hours": 6.0,
+    "field_completeness": 0.93
+  },
+  {
+    "provider_id": "filing_backup",
+    "data_domain": "filing_metrics",
+    "mode": "fallback",
+    "provider_kind": "mock",
+    "priority": 2,
+    "enabled": true,
+    "latency_hours": 12.0,
+    "field_completeness": 0.78
+  }
+]

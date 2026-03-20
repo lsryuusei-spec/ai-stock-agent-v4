@@ -1,0 +1,20 @@
+{
+  "documents": [
+    {
+      "title": "Macro note batch",
+      "source_name": "desk_note",
+      "source_type": "curated_note",
+      "region": "cn",
+      "published_at": "2026-03-14T09:00:00Z",
+      "content": "China policy support and credit stabilization are improving the macro backdrop for domestic technology."
+    },
+    {
+      "title": "Consensus note batch",
+      "source_name": "desk_note",
+      "source_type": "curated_note",
+      "region": "cn",
+      "published_at": "2026-03-14T09:00:00Z",
+      "content": "Current market consensus is crowded around AI leaders and much of the optimism is priced in."
+    }
+  ]
+}

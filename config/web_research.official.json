@@ -1,0 +1,28 @@
+[
+  {
+    "provider_id": "web_official",
+    "provider_kind": "official",
+    "enabled": true,
+    "file_path": "config/official_sources_example.json",
+    "max_results": 3,
+    "provider_options": {
+      "source_targets": ["cninfo", "hkex", "ir"],
+      "hkex_urls": {
+        "tencent_hk": {
+          "url": "https://www.hkexnews.hk/listedco/listconews/sehk/2026/0310/example.pdf",
+          "title": "Tencent quarterly operations update",
+          "snippet": "Configured HKEXnews disclosure placeholder for Tencent."
+        }
+      },
+      "ir_urls": {
+        "smic_cn": "https://investor.example.com/smic/capacity-update"
+      }
+    }
+  },
+  {
+    "provider_id": "web_akshare",
+    "provider_kind": "akshare",
+    "enabled": true,
+    "max_results": 3
+  }
+]

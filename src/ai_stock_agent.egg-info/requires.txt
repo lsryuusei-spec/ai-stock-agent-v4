@@ -1,0 +1,2 @@
+langgraph>=1.1.0
+pydantic>=2.12.5

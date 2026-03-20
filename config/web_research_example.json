@@ -1,0 +1,59 @@
+{
+  "macro_theme": [
+    {
+      "title": "AI infrastructure spending remains selective",
+      "snippet": "Industry commentary suggests hyperscaler spending is still focused on near-term ROI.",
+      "url": "https://example.com/macro/ai-infra-selective",
+      "source_name": "example_macro",
+      "published_at": "2026-03-10T10:00:00Z",
+      "relevance_score": 0.82,
+      "evidence_type": "macro_news"
+    }
+  ],
+  "entities": {
+    "amd_us": [
+      {
+        "title": "AMD launches updated AI roadmap",
+        "snippet": "Company commentary highlights improving AI accelerator cadence.",
+        "url": "https://example.com/amd/ai-roadmap",
+        "source_name": "example_company_news",
+        "published_at": "2026-03-09T09:00:00Z",
+        "relevance_score": 0.9,
+        "evidence_type": "company_news"
+      }
+    ],
+    "smic_cn": [
+      {
+        "title": "SMIC capacity expansion update",
+        "snippet": "Foundry expansion commentary points to improving domestic advanced-node utilization.",
+        "url": "https://example.com/smic-cn/capacity-update",
+        "source_name": "example_cn_notice",
+        "published_at": "2026-03-09T13:00:00Z",
+        "relevance_score": 0.87,
+        "evidence_type": "company_notice"
+      }
+    ],
+    "tencent_hk": [
+      {
+        "title": "Tencent AI cloud product cadence remains active",
+        "snippet": "Recent management comments continue to emphasize enterprise AI deployment and cloud monetization.",
+        "url": "https://example.com/tencent-hk/ai-cloud",
+        "source_name": "example_hk_news",
+        "published_at": "2026-03-09T16:00:00Z",
+        "relevance_score": 0.86,
+        "evidence_type": "company_news"
+      }
+    ],
+    "nvda_us": [
+      {
+        "title": "NVIDIA ecosystem demand remains strong",
+        "snippet": "Channel checks point to ongoing training cluster demand.",
+        "url": "https://example.com/nvda/ecosystem-demand",
+        "source_name": "example_channel_check",
+        "published_at": "2026-03-08T08:00:00Z",
+        "relevance_score": 0.88,
+        "evidence_type": "channel_check"
+      }
+    ]
+  }
+}

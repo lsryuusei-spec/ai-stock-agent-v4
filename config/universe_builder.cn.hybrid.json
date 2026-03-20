@@ -1,0 +1,11 @@
+{
+  "source_kind": "hybrid",
+  "source_priority": ["tushare", "akshare"],
+  "function": "stock_zh_a_spot",
+  "max_entities": 24,
+  "core_size": 3,
+  "secondary_size": 3,
+  "high_beta_size": 2,
+  "auth_env_var": "TUSHARE_TOKEN",
+  "sample_ticker": "688981.SH"
+}

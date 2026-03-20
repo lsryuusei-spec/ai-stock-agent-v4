@@ -1,0 +1,9 @@
+[
+  {
+    "provider_id": "web_file",
+    "provider_kind": "file",
+    "enabled": true,
+    "file_path": "config/web_research_example.json",
+    "max_results": 3
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "macro_prices": {
+    "ust_10y": 4.32,
+    "volatility_regime": 21.4
+  },
+  "market_breadth": {
+    "liquidity_breadth": 55.8
+  },
+  "sector_signals": {
+    "ai_capex_momentum": 67.5
+  },
+  "filing_metrics": {
+    "amd_us": {
+      "base_quality": 82,
+      "industry_position_score": 84,
+      "macro_alignment_score": 88,
+      "valuation_score": 70,
+      "catalyst_score": 78,
+      "risk_penalty": 38,
+      "composite_tradability": 91,
+      "data_freshness_hours": 108
+    }
+  }
+}

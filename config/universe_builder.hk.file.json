@@ -1,0 +1,8 @@
+{
+  "source_kind": "file",
+  "file_path": "config/universe_snapshot_hk.json",
+  "max_entities": 6,
+  "core_size": 2,
+  "secondary_size": 2,
+  "high_beta_size": 1
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "provider_id": "macro_http",
+    "data_domain": "macro_prices",
+    "mode": "primary",
+    "provider_kind": "http",
+    "priority": 1,
+    "base_url": "https://your-provider.example.com",
+    "endpoint": "/macro",
+    "auth_env_var": "FINANCE_API_KEY",
+    "timeout_seconds": 10.0,
+    "enabled": false,
+    "latency_hours": 1.0,
+    "field_completeness": 0.95
+  },
+  {
+    "provider_id": "macro_backup",
+    "data_domain": "macro_prices",
+    "mode": "fallback",
+    "provider_kind": "mock",
+    "priority": 2,
+    "enabled": true,
+    "latency_hours": 5.0,
+    "field_completeness": 0.82
+  }
+]

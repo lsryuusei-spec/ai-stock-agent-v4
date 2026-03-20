@@ -1,0 +1,91 @@
+[
+  {
+    "provider_id": "macro_primary",
+    "data_domain": "macro_prices",
+    "mode": "primary",
+    "provider_kind": "mock",
+    "priority": 1,
+    "enabled": true,
+    "latency_hours": 2.0,
+    "field_completeness": 0.96
+  },
+  {
+    "provider_id": "hk_breadth_alltick",
+    "data_domain": "market_breadth",
+    "mode": "primary",
+    "provider_kind": "alltick",
+    "priority": 1,
+    "enabled": false,
+    "base_url": "https://quote.alltick.io",
+    "endpoint": "/quote-batch",
+    "auth_env_var": "ALLTICK_API_KEY",
+    "timeout_seconds": 10.0,
+    "latency_hours": 0.5,
+    "field_completeness": 0.9,
+    "provider_options": {
+      "auth_header": "token",
+      "symbol_param": "symbol",
+      "response_path": [
+        "data",
+        "quotes"
+      ],
+      "symbols": [
+        "700.HK",
+        "9988.HK",
+        "1810.HK"
+      ]
+    }
+  },
+  {
+    "provider_id": "hk_quote_alltick",
+    "data_domain": "filing_metrics",
+    "mode": "primary",
+    "provider_kind": "alltick",
+    "priority": 1,
+    "enabled": false,
+    "base_url": "https://quote.alltick.io",
+    "endpoint": "/quote",
+    "auth_env_var": "ALLTICK_API_KEY",
+    "timeout_seconds": 10.0,
+    "latency_hours": 0.2,
+    "field_completeness": 0.86,
+    "provider_options": {
+      "auth_header": "token",
+      "symbol_param": "symbol",
+      "symbol_template": "{ticker}.HK",
+      "response_path": [
+        "data"
+      ]
+    }
+  },
+  {
+    "provider_id": "market_breadth_backup",
+    "data_domain": "market_breadth",
+    "mode": "fallback",
+    "provider_kind": "mock",
+    "priority": 2,
+    "enabled": true,
+    "latency_hours": 4.0,
+    "field_completeness": 0.82
+  },
+  {
+    "provider_id": "filing_backup",
+    "data_domain": "filing_metrics",
+    "mode": "fallback",
+    "provider_kind": "mock",
+    "priority": 2,
+    "enabled": true,
+    "latency_hours": 8.0,
+    "field_completeness": 0.8
+  },
+  {
+    "provider_id": "sector_internal",
+    "data_domain": "sector_signals",
+    "mode": "primary",
+    "provider_kind": "mock",
+    "priority": 1,
+    "enabled": true,
+    "latency_hours": 4.0,
+    "field_completeness": 0.91
+  }
+]

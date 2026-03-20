@@ -1,0 +1,74 @@
+[
+  {
+    "code": "0700",
+    "name": "Tencent Cloud",
+    "sector": "Cloud Platform",
+    "market_cap": 3300,
+    "amount": 7800000000,
+    "turnover_rate": 1.3,
+    "volume_ratio": 1.1,
+    "pct_chg": 1.8,
+    "pe": 22,
+    "pb": 3.5
+  },
+  {
+    "code": "0981",
+    "name": "SMIC HK",
+    "sector": "Semiconductor Foundry",
+    "market_cap": 190,
+    "amount": 2100000000,
+    "turnover_rate": 2.8,
+    "volume_ratio": 1.4,
+    "pct_chg": 2.9,
+    "pe": 36,
+    "pb": 2.9
+  },
+  {
+    "code": "1810",
+    "name": "Xiaomi AI Device",
+    "sector": "Edge AI Hardware",
+    "market_cap": 540,
+    "amount": 3200000000,
+    "turnover_rate": 2.2,
+    "volume_ratio": 1.3,
+    "pct_chg": 2.1,
+    "pe": 24,
+    "pb": 3.1
+  },
+  {
+    "code": "9988",
+    "name": "Alibaba Cloud",
+    "sector": "Cloud Platform",
+    "market_cap": 1700,
+    "amount": 3500000000,
+    "turnover_rate": 1.6,
+    "volume_ratio": 1.0,
+    "pct_chg": 1.2,
+    "pe": 16,
+    "pb": 1.8
+  },
+  {
+    "code": "0992",
+    "name": "Lenovo Edge",
+    "sector": "AI PC Server",
+    "market_cap": 148,
+    "amount": 1200000000,
+    "turnover_rate": 2.7,
+    "volume_ratio": 1.2,
+    "pct_chg": 3.7,
+    "pe": 14,
+    "pb": 2.4
+  },
+  {
+    "code": "0522",
+    "name": "ASMPT",
+    "sector": "Semiconductor Equipment",
+    "market_cap": 52,
+    "amount": 580000000,
+    "turnover_rate": 1.9,
+    "volume_ratio": 1.1,
+    "pct_chg": 2.8,
+    "pe": 19,
+    "pb": 1.9
+  }
+]
