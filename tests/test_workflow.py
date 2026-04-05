@@ -30,7 +30,7 @@ from ai_stock_agent.knowledge_base import (
 )
 from ai_stock_agent.evidence_fusion import build_entity_evidence_summary
 from ai_stock_agent.providers import make_provider
-from ai_stock_agent.scoring import build_frozen_packet, compute_scorecard
+from ai_stock_agent.scoring import build_frozen_packet, compute_scorecard, validate_bucket_transition
 from ai_stock_agent.storage import SQLiteStateStore
 from ai_stock_agent.tushare_probe import probe_tushare_access
 from ai_stock_agent.universe_builder import build_initial_universe_bundle
@@ -893,6 +893,9 @@ class WorkflowTestCase(unittest.TestCase):
             self.assertEqual(eoptolink_delta["to_bucket"], "shadow_watch")
             self.assertEqual(eoptolink_delta["route"], "shadow_observation")
             self.assertTrue(any("evidence_gate=" in note for note in result["run_state"].decision_output["notes"]))
+
+    def test_secondary_candidates_can_fall_back_to_shadow_watch(self) -> None:
+        validate_bucket_transition(Bucket.SECONDARY_CANDIDATES, Bucket.SHADOW_WATCH)
 
     def test_official_evidence_boosts_entity_fusion_confidence(self) -> None:
         now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
