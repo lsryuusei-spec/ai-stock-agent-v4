@@ -895,6 +895,7 @@ class WorkflowTestCase(unittest.TestCase):
             self.assertTrue(any("evidence_gate=" in note for note in result["run_state"].decision_output["notes"]))
 
     def test_official_evidence_boosts_entity_fusion_confidence(self) -> None:
+        now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
         entity = EntityProfile(
             entity_id="smic_cn",
             ticker="688981.SH",
@@ -961,7 +962,7 @@ class WorkflowTestCase(unittest.TestCase):
                                 "snippet": "Exchange disclosure confirms new capex cadence.",
                                 "url": "https://www.hkex.com.hk/News/SMIC-capacity-update",
                                 "source_name": "HKEX",
-                                "published_at": "2026-03-10T09:00:00Z",
+                                "published_at": now_iso,
                                 "relevance_score": 0.82,
                                 "source_tier": "official",
                                 "source_score": 0.95,
@@ -971,7 +972,7 @@ class WorkflowTestCase(unittest.TestCase):
                         ],
                         "summary": "official only",
                         "status": "ok",
-                        "created_at": "2026-03-10T09:00:00Z",
+                        "created_at": now_iso,
                     }
                 )
             ],
