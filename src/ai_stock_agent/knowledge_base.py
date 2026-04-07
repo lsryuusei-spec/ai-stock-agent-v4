@@ -643,12 +643,28 @@ def _macro_theme_terms(macro_theme: str) -> set[str]:
     }
 
 
+def _entity_aliases(values: list[str] | set[str] | tuple[str, ...]) -> set[str]:
+    aliases: set[str] = set()
+    for raw in values:
+        normalized = str(raw).strip().lower()
+        if not normalized:
+            continue
+        aliases.add(normalized)
+        aliases.add(normalized.split(".", 1)[0])
+        aliases.add(normalized.split("_", 1)[0])
+        digits = "".join(char for char in normalized if char.isdigit())
+        if digits:
+            aliases.add(digits)
+    return aliases
+
+
 def _slice_relevance(item: KnowledgeSlice, macro_theme: str, entity_ids: set[str]) -> float:
     score = item.confidence * _freshness_weight(item)
     lowered = f"{item.title} {item.slice_text}".lower()
+    entity_aliases = _entity_aliases(item.entity_tags)
     if any(term in lowered for term in _macro_theme_terms(macro_theme)):
         score += 0.18
-    if entity_ids.intersection({tag.lower() for tag in item.entity_tags}):
+    if entity_ids.intersection(entity_aliases):
         score += 0.22
     if "china_policy" in item.topic_tags:
         score += 0.08
@@ -671,7 +687,7 @@ def query_knowledge_slices(
 ) -> list[KnowledgeSlice]:
     refreshed = refresh_slice_statuses(slices)
     requested_topics = {item.lower() for item in topic_tags or []}
-    requested_entities = {item.lower() for item in entity_tags or []}
+    requested_entities = _entity_aliases(entity_tags or [])
     filtered: list[KnowledgeSlice] = []
     for item in refreshed:
         if not _region_compatible(item.region, market):
@@ -684,7 +700,7 @@ def query_knowledge_slices(
             continue
         if requested_topics and not requested_topics.intersection({tag.lower() for tag in item.topic_tags}):
             continue
-        if requested_entities and not requested_entities.intersection({tag.lower() for tag in item.entity_tags}):
+        if requested_entities and not requested_entities.intersection(_entity_aliases(item.entity_tags)):
             continue
         filtered.append(item)
     ranked = sorted(

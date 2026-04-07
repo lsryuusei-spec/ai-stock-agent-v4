@@ -177,6 +177,29 @@ def _latest_tushare_trade_date(client: Any, sample_ticker: str, api_name: str) -
     return str(trade_date)
 
 
+def _safe_tushare_records(client: Any, api_name: str, **kwargs: Any) -> tuple[list[dict[str, Any]], str | None]:
+    if not hasattr(client, api_name):
+        return [], f"tushare api not available: {api_name}"
+    try:
+        frame = getattr(client, api_name)(**kwargs)
+    except Exception as exc:  # pragma: no cover - depends on live vendor responses
+        return [], f"{api_name}:{exc}"
+    records = _records_from_frame(frame)
+    if not records:
+        return [], f"{api_name}:empty"
+    return records, None
+
+
+def _resolve_tushare_trade_date(client: Any, sample_ticker: str, api_names: list[str]) -> tuple[str | None, list[str]]:
+    errors: list[str] = []
+    for api_name in api_names:
+        try:
+            return _latest_tushare_trade_date(client, sample_ticker, api_name), errors
+        except Exception as exc:  # pragma: no cover - depends on live vendor responses
+            errors.append(f"{api_name}:{exc}")
+    return None, errors
+
+
 def _load_tushare_records(market: str, config: dict[str, Any]) -> list[dict[str, Any]]:
     try:
         tushare = importlib.import_module("tushare")
@@ -188,17 +211,37 @@ def _load_tushare_records(market: str, config: dict[str, Any]) -> list[dict[str,
     client = tushare.pro_api(token)
 
     if market == "cn":
-        latest_trade_date = _latest_tushare_trade_date(client, str(config.get("sample_ticker", "688981.SH")), "daily")
-        base_records = _records_from_frame(
-            client.stock_basic(
-                exchange="",
-                list_status="L",
-                fields="ts_code,symbol,name,industry,market,list_date",
-            )
+        merged_lists: list[list[dict[str, Any]]] = []
+        errors: list[str] = []
+        base_records, error = _safe_tushare_records(
+            client,
+            "stock_basic",
+            exchange="",
+            list_status="L",
+            fields="ts_code,symbol,name,industry,market,list_date",
         )
-        daily_basic_records = _records_from_frame(client.daily_basic(trade_date=latest_trade_date))
-        daily_records = _records_from_frame(client.daily(trade_date=latest_trade_date))
+        if base_records:
+            merged_lists.append(base_records)
+        elif error:
+            errors.append(error)
+        latest_trade_date, trade_date_errors = _resolve_tushare_trade_date(
+            client,
+            str(config.get("sample_ticker", "688981.SH")),
+            ["daily", "daily_basic"],
+        )
+        errors.extend(trade_date_errors)
         optional_records: list[list[dict[str, Any]]] = []
+        if latest_trade_date:
+            daily_basic_records, error = _safe_tushare_records(client, "daily_basic", trade_date=latest_trade_date)
+            if daily_basic_records:
+                merged_lists.append(daily_basic_records)
+            elif error:
+                errors.append(error)
+            daily_records, error = _safe_tushare_records(client, "daily", trade_date=latest_trade_date)
+            if daily_records:
+                merged_lists.append(daily_records)
+            elif error:
+                errors.append(error)
         if hasattr(client, "stock_company"):
             company_fields = str(
                 config.get(
@@ -207,23 +250,41 @@ def _load_tushare_records(market: str, config: dict[str, Any]) -> list[dict[str,
                 )
             )
             for exchange in ("SSE", "SZSE", "BSE"):
-                try:
-                    optional_records.append(
-                        _records_from_frame(client.stock_company(exchange=exchange, fields=company_fields))
-                    )
-                except Exception:
-                    continue
+                records, _ = _safe_tushare_records(client, "stock_company", exchange=exchange, fields=company_fields)
+                if records:
+                    optional_records.append(records)
         if hasattr(client, "moneyflow"):
-            try:
-                optional_records.append(_records_from_frame(client.moneyflow(trade_date=latest_trade_date)))
-            except Exception:
-                pass
-        return _merge_record_lists([base_records, daily_basic_records, daily_records, *optional_records], market)
+            if latest_trade_date:
+                records, _ = _safe_tushare_records(client, "moneyflow", trade_date=latest_trade_date)
+                if records:
+                    optional_records.append(records)
+        merged_lists.extend(optional_records)
+        if merged_lists:
+            return _merge_record_lists(merged_lists, market)
+        raise ValueError(f"tushare cn source failed: {'; '.join(errors) if errors else 'no records'}")
 
-    latest_trade_date = _latest_tushare_trade_date(client, str(config.get("sample_ticker", "00700.HK")), "hk_daily")
-    base_records = _records_from_frame(client.hk_basic())
-    daily_records = _records_from_frame(client.hk_daily(trade_date=latest_trade_date))
-    return _merge_record_lists([base_records, daily_records], market)
+    merged_lists = []
+    errors: list[str] = []
+    base_records, error = _safe_tushare_records(client, "hk_basic")
+    if base_records:
+        merged_lists.append(base_records)
+    elif error:
+        errors.append(error)
+    latest_trade_date, trade_date_errors = _resolve_tushare_trade_date(
+        client,
+        str(config.get("sample_ticker", "00700.HK")),
+        ["hk_daily"],
+    )
+    errors.extend(trade_date_errors)
+    if latest_trade_date:
+        daily_records, error = _safe_tushare_records(client, "hk_daily", trade_date=latest_trade_date)
+        if daily_records:
+            merged_lists.append(daily_records)
+        elif error:
+            errors.append(error)
+    if merged_lists:
+        return _merge_record_lists(merged_lists, market)
+    raise ValueError(f"tushare hk source failed: {'; '.join(errors) if errors else 'no records'}")
 
 
 def _load_akshare_records(market: str, config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -238,6 +299,7 @@ def _load_akshare_records(market: str, config: dict[str, Any]) -> list[dict[str,
     else:
         candidates.extend(["stock_zh_a_spot", "stock_zh_a_spot_em"])
     seen: set[str] = set()
+    successful: list[list[dict[str, Any]]] = []
     for function_name in candidates:
         if function_name in seen:
             continue
@@ -250,7 +312,9 @@ def _load_akshare_records(market: str, config: dict[str, Any]) -> list[dict[str,
             continue
         records = _records_from_frame(frame)
         if records:
-            return records
+            successful.append(records)
+    if successful:
+        return _merge_record_lists(successful, market)
     raise ValueError("no akshare snapshot function returned records")
 
 

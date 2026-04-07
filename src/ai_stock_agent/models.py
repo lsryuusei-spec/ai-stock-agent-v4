@@ -653,6 +653,7 @@ class PostMortemReport(BaseModel):
 
 class RunState(BaseModel):
     run_id: str
+    created_at: datetime | None = None
     run_mode: RunMode
     run_status: RunStatus = RunStatus.CREATED
     market: str
@@ -663,6 +664,7 @@ class RunState(BaseModel):
     policy_version_set: PolicyVersionSet = Field(default_factory=PolicyVersionSet)
     incumbent_review_set: list[str] = Field(default_factory=list)
     challenger_set: list[str] = Field(default_factory=list)
+    process_trace: list[dict[str, Any]] = Field(default_factory=list)
     decision_output: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str
     parent_run_id: str | None = None

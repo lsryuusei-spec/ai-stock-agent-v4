@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .data_adapters import load_provider_configs
@@ -60,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     pool_parser = subparsers.add_parser("show-pool", help="Display current pool state")
     pool_parser.add_argument("--pool-id", default="us_macro_ai_pool")
+    latest_run_parser = subparsers.add_parser("show-latest-run", help="Display a concise summary of the latest workflow run")
+    latest_run_parser.add_argument("--run-id", help="Optional explicit run id")
+    latest_run_parser.add_argument("--limit", type=int, default=10, help="Maximum number of deltas to include")
+    run_trace_parser = subparsers.add_parser("show-run-trace", help="Display the recorded step-by-step workflow trace")
+    run_trace_parser.add_argument("--run-id", help="Optional explicit run id")
     subparsers.add_parser("show-audit", help="Display audit records")
     subparsers.add_parser("show-context", help="Display theme decomposition and market context snapshots")
     subparsers.add_parser("show-prescreen", help="Display factor registry and challenger prescreen decisions")
@@ -182,6 +189,136 @@ def cmd_show_pool(db_path: str, pool_id: str) -> None:
     companies = [company for company in store.list_companies() if company.entity_id in pool_company_ids]
     print(json.dumps(pool.model_dump(mode="json"), indent=2, ensure_ascii=False))
     print(json.dumps([company.model_dump(mode="json") for company in companies], indent=2, ensure_ascii=False))
+
+
+def cmd_show_latest_run(db_path: str, run_id: str | None, limit: int) -> None:
+    store = SQLiteStateStore(db_path)
+    runs = store.list_runs()
+    if not runs:
+        print("No runs found. Run run-mvp first.")
+        return
+
+    selected = store.load_run(run_id) if run_id else None
+    if run_id and selected is None:
+        print(f"Run not found: {run_id}")
+        return
+    if selected is None:
+        selected = max(
+            runs,
+            key=lambda item: (
+                item.created_at or datetime.min.replace(tzinfo=UTC),
+                item.run_id,
+            ),
+        )
+
+    deltas = selected.decision_output.get("deltas", [])
+    ordered_deltas = sorted(
+        deltas,
+        key=lambda item: item.get("score_snapshot", {}).get("retention_priority_score", 0.0),
+        reverse=True,
+    )
+    research_records = [item for item in store.list_web_research_records() if item.run_id == selected.run_id]
+    provider_counts = Counter(item.provider_id for item in research_records)
+    latest_context = None
+    contexts = store.list_market_contexts()
+    if contexts:
+        latest_context = max(
+            contexts,
+            key=lambda item: (
+                item.as_of,
+                item.context_id,
+            ),
+        )
+    summary = {
+        "run_id": selected.run_id,
+        "created_at": selected.created_at.isoformat() if selected.created_at else None,
+        "run_mode": selected.run_mode,
+        "run_status": selected.run_status,
+        "market": selected.market,
+        "macro_theme": selected.macro_theme,
+        "wake_scope": selected.wake_scope,
+        "trigger_event_count": len(selected.trigger_event_ids),
+        "incumbent_review_count": len(selected.incumbent_review_set),
+        "challenger_count": len(selected.challenger_set),
+        "delta_count": len(deltas),
+        "process_step_count": len(selected.process_trace),
+        "web_provider_counts": dict(provider_counts),
+        "notes": selected.decision_output.get("notes", []),
+        "latest_market_context": (
+            {
+                "as_of": latest_context.as_of.isoformat(),
+                "regime": latest_context.regime,
+                "context_status": latest_context.context_status,
+                "regime_confidence": latest_context.regime_confidence,
+                "context_summary": latest_context.context_summary,
+                "source_health": [
+                    {
+                        "data_domain": item.data_domain,
+                        "primary_source": item.primary_source,
+                        "backup_source": item.backup_source,
+                        "status": item.status,
+                        "field_completeness": item.field_completeness,
+                        "latency_hours": item.latency_hours,
+                        "degradation_path": item.degradation_path,
+                    }
+                    for item in latest_context.source_health
+                ],
+            }
+            if latest_context
+            else None
+        ),
+        "top_deltas": [
+            {
+                "entity_id": item.get("entity_id"),
+                "route": item.get("route"),
+                "from_bucket": item.get("from_bucket"),
+                "to_bucket": item.get("to_bucket"),
+                "from_thesis_status": item.get("from_thesis_status"),
+                "to_thesis_status": item.get("to_thesis_status"),
+                "current_quality_score": item.get("score_snapshot", {}).get("current_quality_score"),
+                "trajectory_score": item.get("score_snapshot", {}).get("trajectory_score"),
+                "retention_priority_score": item.get("score_snapshot", {}).get("retention_priority_score"),
+            }
+            for item in ordered_deltas[:limit]
+        ],
+    }
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+def cmd_show_run_trace(db_path: str, run_id: str | None) -> None:
+    store = SQLiteStateStore(db_path)
+    runs = store.list_runs()
+    if not runs:
+        print("No runs found. Run run-mvp first.")
+        return
+
+    selected = store.load_run(run_id) if run_id else None
+    if run_id and selected is None:
+        print(f"Run not found: {run_id}")
+        return
+    if selected is None:
+        selected = max(
+            runs,
+            key=lambda item: (
+                item.created_at or datetime.min.replace(tzinfo=UTC),
+                item.run_id,
+            ),
+        )
+
+    print(
+        json.dumps(
+            {
+                "run_id": selected.run_id,
+                "created_at": selected.created_at.isoformat() if selected.created_at else None,
+                "run_mode": selected.run_mode,
+                "run_status": selected.run_status,
+                "market": selected.market,
+                "process_trace": selected.process_trace,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
 
 def cmd_show_audit(db_path: str) -> None:
@@ -433,6 +570,10 @@ def main() -> None:
         )
     elif args.command == "show-pool":
         cmd_show_pool(args.db, args.pool_id)
+    elif args.command == "show-latest-run":
+        cmd_show_latest_run(args.db, args.run_id, args.limit)
+    elif args.command == "show-run-trace":
+        cmd_show_run_trace(args.db, args.run_id)
     elif args.command == "show-audit":
         cmd_show_audit(args.db)
     elif args.command == "show-context":

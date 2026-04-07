@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -116,6 +117,92 @@ def _web_research_manager(state: WorkflowState):
     return build_web_research_manager(state.get("web_config_path"))
 
 
+def _trace_value(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _trace_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_trace_value(item) for item in value]
+    return value
+
+
+def _summarize_step_updates(updates: WorkflowState) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    if "trigger_events" in updates:
+        summary["trigger_events"] = len(updates["trigger_events"])
+    if "wake_entities" in updates:
+        summary["wake_entities"] = len(updates["wake_entities"])
+    if "web_research_records" in updates:
+        summary["web_research_records"] = len(updates["web_research_records"])
+    if "knowledge_context" in updates:
+        summary["knowledge_context"] = "loaded"
+    if "theme_decomposition" in updates:
+        summary["theme_slices"] = len(updates["theme_decomposition"].theme_slices)
+    if "market_context" in updates:
+        summary["market_context"] = {
+            "regime": updates["market_context"].regime,
+            "context_status": updates["market_context"].context_status,
+        }
+    if "source_health" in updates:
+        summary["source_health"] = {
+            item.data_domain: item.status for item in updates["source_health"]
+        }
+    if "defender_ids" in updates:
+        summary["defenders"] = len(updates["defender_ids"])
+    if "challenger_ids" in updates:
+        summary["challengers"] = len(updates["challenger_ids"])
+    if "prescreen_results" in updates:
+        results = list(updates["prescreen_results"].values())
+        summary["prescreen"] = {
+            "total": len(results),
+            "passed": sum(1 for item in results if item.passed),
+            "shadow_watch": sum(1 for item in results if item.decision == "shadow_watch"),
+            "defer": sum(1 for item in results if item.decision == "defer"),
+        }
+    if "scorecards" in updates:
+        summary["scorecards"] = len(updates["scorecards"])
+    if "deltas" in updates:
+        summary["deltas"] = len(updates["deltas"])
+    if "pool" in updates:
+        summary["pool"] = {
+            "current_pool_members": len(updates["pool"].current_pool_members),
+            "shadow_watch_members": len(updates["pool"].shadow_watch_members),
+            "archived_members": len(updates["pool"].archived_members),
+        }
+    if "evaluation_metrics" in updates:
+        summary["evaluation_metrics"] = updates["evaluation_metrics"].metrics_id
+    if "post_mortem_report" in updates:
+        summary["post_mortem_report"] = updates["post_mortem_report"].report_id
+    if "merge_notes" in updates and updates["merge_notes"]:
+        summary["merge_notes_tail"] = updates["merge_notes"][-3:]
+    return _trace_value(summary)
+
+
+def _instrument_step(step_name: str, fn):
+    def wrapped(state: WorkflowState) -> WorkflowState:
+        updates = fn(state)
+        run_state = updates.get("run_state") or state.get("run_state")
+        if run_state is None:
+            return updates
+        trace_entry = {
+            "step": step_name,
+            "completed_at": datetime.now(UTC).isoformat(),
+            "summary": _summarize_step_updates(updates),
+        }
+        updated_run_state = run_state.model_copy(
+            update={"process_trace": [*run_state.process_trace, trace_entry]}
+        )
+        _store(state).save_run(updated_run_state)
+        normalized_updates = dict(updates)
+        normalized_updates["run_state"] = updated_run_state
+        return normalized_updates
+
+    return wrapped
+
+
 def _ticker_matches(entity_ticker: str, raw_ticker: str | None) -> bool:
     if not raw_ticker:
         return False
@@ -129,6 +216,22 @@ def _ticker_matches(entity_ticker: str, raw_ticker: str | None) -> bool:
     return incoming in candidates or incoming.split(".", 1)[0] in candidates or (
         incoming_digits and incoming_digits in candidates
     )
+
+
+def _knowledge_entity_tags(state: WorkflowState) -> list[str]:
+    aliases: set[str] = set(state.get("wake_entities", []))
+    entity_map = state.get("entity_map", {})
+    for entity_id in state.get("wake_entities", []):
+        entity = entity_map.get(entity_id)
+        if entity is None:
+            continue
+        aliases.add(entity.entity_id)
+        aliases.add(entity.ticker)
+        aliases.add(entity.ticker.split(".", 1)[0])
+        digits = "".join(char for char in entity.ticker if char.isdigit())
+        if digits:
+            aliases.add(digits)
+    return sorted(aliases)
 
 
 def _resolve_pool_for_entity(
@@ -186,6 +289,7 @@ def _n0_initialize_run(state: WorkflowState) -> WorkflowState:
     run_mode = RunMode(state["run_mode"])
     run_state = RunState(
         run_id=make_id("run"),
+        created_at=datetime.now(UTC),
         run_mode=run_mode,
         run_status=RunStatus.RUNNING,
         market=context["universe"].market,
@@ -328,7 +432,7 @@ def _knowledge_overlay(state: WorkflowState) -> WorkflowState:
         market=state["universe"].market,
         slices=store.list_knowledge_slices(),
         policy=policy,
-        wake_entity_ids=state.get("wake_entities", []),
+        wake_entity_ids=_knowledge_entity_tags(state),
     )
     store.save_knowledge_context(knowledge_context)
     notes = list(state.get("merge_notes", []))
@@ -983,23 +1087,23 @@ def _n13_dynamic_post_mortem_loop(state: WorkflowState) -> WorkflowState:
 
 def build_workflow():
     builder = StateGraph(WorkflowState)
-    builder.add_node("n0_initialize_run", _n0_initialize_run)
-    builder.add_node("trigger_triage", _trigger_triage)
-    builder.add_node("web_research", _web_research)
-    builder.add_node("knowledge_overlay", _knowledge_overlay)
-    builder.add_node("n1_theme_decomposition", _n1_theme_decomposition)
-    builder.add_node("n2_market_context_loader", _n2_market_context_loader)
-    builder.add_node("n3_incumbent_health_check", _n3_incumbent_health_check)
-    builder.add_node("n4_defender_selection", _n4_defender_selection)
-    builder.add_node("n5_external_challenger_scan", _n5_external_challenger_scan)
-    builder.add_node("n6_challenger_prescreen", _n6_challenger_prescreen)
-    builder.add_node("n7_deep_scoring", _n7_deep_scoring)
-    builder.add_node("n8_arena", _n8_arena)
-    builder.add_node("n9_decision_engine", _n9_decision_engine)
-    builder.add_node("n10_merge", _n10_merge)
-    builder.add_node("n11_pool_reassembler", _n11_pool_reassembler)
-    builder.add_node("n12_archive_and_version_control", _n12_archive_and_version_control)
-    builder.add_node("n13_dynamic_post_mortem_loop", _n13_dynamic_post_mortem_loop)
+    builder.add_node("n0_initialize_run", _instrument_step("n0_initialize_run", _n0_initialize_run))
+    builder.add_node("trigger_triage", _instrument_step("trigger_triage", _trigger_triage))
+    builder.add_node("web_research", _instrument_step("web_research", _web_research))
+    builder.add_node("knowledge_overlay", _instrument_step("knowledge_overlay", _knowledge_overlay))
+    builder.add_node("n1_theme_decomposition", _instrument_step("n1_theme_decomposition", _n1_theme_decomposition))
+    builder.add_node("n2_market_context_loader", _instrument_step("n2_market_context_loader", _n2_market_context_loader))
+    builder.add_node("n3_incumbent_health_check", _instrument_step("n3_incumbent_health_check", _n3_incumbent_health_check))
+    builder.add_node("n4_defender_selection", _instrument_step("n4_defender_selection", _n4_defender_selection))
+    builder.add_node("n5_external_challenger_scan", _instrument_step("n5_external_challenger_scan", _n5_external_challenger_scan))
+    builder.add_node("n6_challenger_prescreen", _instrument_step("n6_challenger_prescreen", _n6_challenger_prescreen))
+    builder.add_node("n7_deep_scoring", _instrument_step("n7_deep_scoring", _n7_deep_scoring))
+    builder.add_node("n8_arena", _instrument_step("n8_arena", _n8_arena))
+    builder.add_node("n9_decision_engine", _instrument_step("n9_decision_engine", _n9_decision_engine))
+    builder.add_node("n10_merge", _instrument_step("n10_merge", _n10_merge))
+    builder.add_node("n11_pool_reassembler", _instrument_step("n11_pool_reassembler", _n11_pool_reassembler))
+    builder.add_node("n12_archive_and_version_control", _instrument_step("n12_archive_and_version_control", _n12_archive_and_version_control))
+    builder.add_node("n13_dynamic_post_mortem_loop", _instrument_step("n13_dynamic_post_mortem_loop", _n13_dynamic_post_mortem_loop))
     builder.add_edge(START, "n0_initialize_run")
     builder.add_edge("n0_initialize_run", "trigger_triage")
     builder.add_edge("trigger_triage", "web_research")
