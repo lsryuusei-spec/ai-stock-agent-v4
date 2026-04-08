@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 import os
 import tempfile
 import unittest
@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from ai_stock_agent.models import DataProviderConfig, EntityProfile
+from ai_stock_agent.models import Bucket, DataProviderConfig, EntityProfile
 from ai_stock_agent.data_adapters import DataSourceManager
 from ai_stock_agent.dashboard import (
     bootstrap_demo_action,
@@ -20,6 +20,7 @@ from ai_stock_agent.dashboard import (
     refresh_knowledge_state,
 )
 from ai_stock_agent.knowledge_base import (
+    build_topic_version_diff,
     build_knowledge_context,
     default_knowledge_policy,
     ingest_knowledge_payload,
@@ -898,7 +899,7 @@ class WorkflowTestCase(unittest.TestCase):
         validate_bucket_transition(Bucket.SECONDARY_CANDIDATES, Bucket.SHADOW_WATCH)
 
     def test_official_evidence_boosts_entity_fusion_confidence(self) -> None:
-        now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        now_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         entity = EntityProfile(
             entity_id="smic_cn",
             ticker="688981.SH",
@@ -2068,6 +2069,15 @@ class WorkflowTestCase(unittest.TestCase):
                         "source_name": "desk_note",
                         "source_type": "curated_note",
                         "region": "cn",
+                        "published_at": "2026-03-10T09:00:00Z",
+                        "content": "China policy support is improving the macro backdrop.",
+                    },
+                    {
+                        "title": "China AI view",
+                        "topic_key": "china_ai_view",
+                        "source_name": "desk_note",
+                        "source_type": "curated_note",
+                        "region": "cn",
                         "published_at": "2026-03-14T09:00:00Z",
                         "content": "China policy support is improving. Current market consensus is crowded around AI.",
                     }
@@ -2093,6 +2103,20 @@ class WorkflowTestCase(unittest.TestCase):
             self.assertTrue(snapshot["topic_tree"])
             self.assertIn("evidence_summaries", snapshot)
             self.assertIn("official_status", snapshot)
+            focused_snapshot = build_dashboard_snapshot(
+                db_path,
+                market="cn",
+                pool_id="cn_macro_ai_pool",
+                topic_key="china_ai_view",
+                status="all",
+            )
+            self.assertIsNotNone(focused_snapshot["topic_diff"])
+            self.assertEqual(focused_snapshot["topic_diff"]["stats"]["from_version"], 1)
+            self.assertEqual(focused_snapshot["topic_diff"]["stats"]["to_version"], 2)
+            self.assertGreaterEqual(
+                focused_snapshot["topic_diff"]["stats"]["added"] + focused_snapshot["topic_diff"]["stats"]["removed"],
+                1,
+            )
 
     def test_dashboard_actions_can_bootstrap_refresh_override_and_build_universe(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2223,6 +2247,103 @@ class WorkflowTestCase(unittest.TestCase):
         self.assertTrue(all(item.status == "retired" for item in retired_slices))
         self.assertTrue(all(item.topic_key == "china_ai_view" for item in resolved_collections))
         self.assertTrue(all(item.status == "retired" for item in retired_collections))
+
+    def test_build_topic_version_diff_reports_document_and_slice_changes(self) -> None:
+        first_document, first_slices, _ = ingest_knowledge_payload(
+            {
+                "title": "China AI view",
+                "topic_key": "china_ai_view",
+                "source_name": "desk_note",
+                "source_type": "curated_note",
+                "region": "cn",
+                "published_at": "2026-03-10T09:00:00Z",
+                "content": "China policy support is improving the macro backdrop.",
+            }
+        )
+        second_document, second_slices, _ = ingest_knowledge_payload(
+            {
+                "title": "China AI view",
+                "topic_key": "china_ai_view",
+                "source_name": "desk_note",
+                "source_type": "curated_note",
+                "region": "cn",
+                "published_at": "2026-03-14T09:00:00Z",
+                "content": "China policy support remains, but market consensus is now crowded around AI.",
+            }
+        )
+        second_document = second_document.model_copy(update={"version": 2, "supersedes_document_id": first_document.document_id})
+        second_slices = [
+            item.model_copy(
+                update={
+                    "document_id": second_document.document_id,
+                    "topic_key": second_document.topic_key,
+                    "version": 2,
+                }
+            )
+            for item in second_slices
+        ]
+        diff = build_topic_version_diff(
+            documents=[first_document, second_document],
+            slices=[*first_slices, *second_slices],
+            topic_key="china_ai_view",
+            region="cn",
+        )
+        self.assertIsNotNone(diff)
+        self.assertEqual(diff["stats"]["from_version"], 1)
+        self.assertEqual(diff["stats"]["to_version"], 2)
+        self.assertGreaterEqual(diff["stats"]["document_fields_changed"], 1)
+        self.assertGreaterEqual(diff["stats"]["added"] + diff["stats"]["removed"], 1)
+        self.assertIn("v1 -> v2", diff["summary"])
+        self.assertTrue(diff["takeaways"])
+
+    def test_dashboard_snapshot_can_compare_explicit_topic_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = str(Path(tmpdir) / "agent.db")
+            bootstrap_demo_data(db_path)
+            ingest_knowledge_batch(
+                db_path,
+                [
+                    {
+                        "title": "China AI view",
+                        "topic_key": "china_ai_view",
+                        "source_name": "desk_note",
+                        "source_type": "curated_note",
+                        "region": "cn",
+                        "published_at": "2026-03-10T09:00:00Z",
+                        "content": "China policy support is improving the macro backdrop.",
+                    },
+                    {
+                        "title": "China AI view",
+                        "topic_key": "china_ai_view",
+                        "source_name": "desk_note",
+                        "source_type": "curated_note",
+                        "region": "cn",
+                        "published_at": "2026-03-12T09:00:00Z",
+                        "content": "China policy support remains, and export demand is stabilizing.",
+                    },
+                    {
+                        "title": "China AI view",
+                        "topic_key": "china_ai_view",
+                        "source_name": "desk_note",
+                        "source_type": "curated_note",
+                        "region": "cn",
+                        "published_at": "2026-03-14T09:00:00Z",
+                        "content": "China policy support remains, but market consensus is now crowded around AI.",
+                    },
+                ],
+            )
+            snapshot = build_dashboard_snapshot(
+                db_path,
+                market="cn",
+                topic_key="china_ai_view",
+                from_version=1,
+                to_version=3,
+                status="all",
+            )
+            self.assertIsNotNone(snapshot["topic_diff"])
+            self.assertEqual(snapshot["topic_diff"]["stats"]["from_version"], 1)
+            self.assertEqual(snapshot["topic_diff"]["stats"]["to_version"], 3)
+            self.assertEqual(len(snapshot["topic_diff"]["available_versions"]), 3)
 
     def test_knowledge_context_builds_layer_signals(self) -> None:
         _, slices, _ = ingest_knowledge_payload(

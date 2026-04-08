@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .knowledge_base import (
+    build_topic_version_diff,
     default_knowledge_policy,
     ingest_knowledge_payload,
     prepare_notebooklm_documents,
@@ -202,6 +203,8 @@ def build_dashboard_snapshot(
     market: str = "cn",
     pool_id: str | None = None,
     topic_key: str | None = None,
+    from_version: int | None = None,
+    to_version: int | None = None,
     layer: str | None = None,
     status: str = "all",
     theme: str = "",
@@ -328,11 +331,24 @@ def build_dashboard_snapshot(
                 if item.entity_id == selected_entity_id
             ],
         }
+    topic_diff = None
+    if topic_key:
+        topic_diff = build_topic_version_diff(
+            documents=documents,
+            slices=slices,
+            topic_key=topic_key,
+            region=market,
+            from_version=from_version,
+            to_version=to_version,
+        )
     return {
         "db_path": db_path,
         "market": market,
         "selected_pool_id": selected_pool.pool_id if selected_pool else None,
         "selected_entity_id": selected_entity_id,
+        "selected_topic_key": topic_key,
+        "selected_from_version": from_version,
+        "selected_to_version": to_version,
         "universes": [item.model_dump(mode="json") for item in universes],
         "pools": [item.model_dump(mode="json") for item in pools],
         "selected_pool": selected_pool.model_dump(mode="json") if selected_pool else None,
@@ -361,6 +377,7 @@ def build_dashboard_snapshot(
         "knowledge_collections": [item.model_dump(mode="json") for item in filtered_collections],
         "knowledge_contexts": [item.model_dump(mode="json") for item in contexts],
         "topic_tree": _build_topic_tree(documents, slices, market, topic_key),
+        "topic_diff": topic_diff,
         "web_research": [item.model_dump(mode="json") for item in research_records],
         "evidence_summaries": [item.model_dump(mode="json") for item in evidence_summaries],
         "official_status": _flatten_official_status(research_records),
@@ -723,6 +740,20 @@ My investment principle is to wait for a better margin of safety when valuation 
             <div class="list" id="officialStatusList"></div>
           </section>
         </section>
+        <section class="panel">
+          <h2>Topic Version Diff</h2>
+          <div class="stack">
+            <div class="row">
+              <div><label>From Version</label><select id="diffFromVersion"></select></div>
+              <div><label>To Version</label><select id="diffToVersion"></select></div>
+            </div>
+            <div class="row">
+              <button class="secondary" onclick="loadSelectedDiff()">Compare Selected Versions</button>
+              <button class="ghost" onclick="resetTopicDiff()">Latest Vs Previous</button>
+            </div>
+            <div id="topicDiff"></div>
+          </div>
+        </section>
         <section class="cards">
           <section class="panel">
             <h2>Runs</h2>
@@ -754,6 +785,7 @@ My investment principle is to wait for a better margin of safety when valuation 
   </div>
   <script>
     let preparedPayload = {documents: []};
+    let activeDiffTopicKey = '';
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -805,6 +837,49 @@ My investment principle is to wait for a better margin of safety when valuation 
       fillSelect('runPoolId', data.pools || [], item => item.pool_id, item => `${item.pool_id} (${item.market})`, document.getElementById('runPoolId').value || data.selected_pool_id || '');
       fillSelect('overridePoolId', data.pools || [], item => item.pool_id, item => `${item.pool_id} (${item.market})`, document.getElementById('overridePoolId').value || data.selected_pool_id || '');
       fillSelect('runUniverseId', data.universes || [], item => item.universe_id, item => `${item.universe_id} (${item.market})`, document.getElementById('runUniverseId').value || '');
+    }
+
+    function clearDiffVersionSelectors() {
+      document.getElementById('diffFromVersion').innerHTML = '<option value="">auto</option>';
+      document.getElementById('diffToVersion').innerHTML = '<option value="">auto</option>';
+    }
+
+    function syncDiffVersionSelectors(data) {
+      const topicKey = document.getElementById('filterTopicKey').value;
+      const fromSelect = document.getElementById('diffFromVersion');
+      const toSelect = document.getElementById('diffToVersion');
+      if (!topicKey) {
+        activeDiffTopicKey = '';
+        clearDiffVersionSelectors();
+        return;
+      }
+      const topic = (data.topic_tree || []).find(item => item.topic_key === topicKey);
+      const versions = topic?.versions || [];
+      if (!versions.length) {
+        activeDiffTopicKey = topicKey;
+        clearDiffVersionSelectors();
+        return;
+      }
+
+      const diff = data.topic_diff || {};
+      const diffStats = diff.stats || {};
+      const previousTopicKey = activeDiffTopicKey;
+      activeDiffTopicKey = topicKey;
+      const currentFrom = previousTopicKey === topicKey ? fromSelect.value : '';
+      const currentTo = previousTopicKey === topicKey ? toSelect.value : '';
+      const defaultTo = String(diffStats.to_version ?? versions[0].version);
+      const defaultFrom = String(diffStats.from_version ?? (versions[1]?.version ?? versions[0].version));
+      const options = ['<option value="">auto</option>'].concat(
+        versions.map(item => `<option value="${escapeHtml(item.version)}">v${escapeHtml(item.version)} ${escapeHtml(item.status)}</option>`)
+      );
+      fromSelect.innerHTML = options.join('');
+      toSelect.innerHTML = options.join('');
+      fromSelect.value = [...fromSelect.options].some(option => option.value === currentFrom)
+        ? currentFrom
+        : ([...fromSelect.options].some(option => option.value === defaultFrom) ? defaultFrom : '');
+      toSelect.value = [...toSelect.options].some(option => option.value === currentTo)
+        ? currentTo
+        : ([...toSelect.options].some(option => option.value === defaultTo) ? defaultTo : '');
     }
 
     async function api(path, options) {
@@ -866,6 +941,56 @@ trajectory=${escapeHtml(company.trajectory_score ?? 'n/a')}</div>
       `;
     }
 
+    function renderTopicDiff(diff) {
+      const root = document.getElementById('topicDiff');
+      if (!diff) {
+        root.innerHTML = '<div class="item"><strong>No diff selected</strong><div class="meta">Focus a topic with at least two versions to compare the latest knowledge update against the previous version.</div></div>';
+        return;
+      }
+      const stats = diff.stats || {};
+      const fromDocument = diff.from_document || {};
+      const toDocument = diff.to_document || {};
+      const takeaways = diff.takeaways || [];
+      const documentChanges = diff.document_changes || [];
+      const addedSlices = diff.added_slices || [];
+      const removedSlices = diff.removed_slices || [];
+      const changedSlices = diff.changed_slices || [];
+      root.innerHTML = `
+        <div class="item">
+          <strong>${escapeHtml(diff.title)} (${escapeHtml(diff.topic_key)})</strong>
+          <div class="pill">v${escapeHtml(stats.from_version)} -> v${escapeHtml(stats.to_version)}</div>
+          <div class="pill ${(stats.changed || stats.added || stats.removed) ? 'warn' : 'ok'}">delta=${escapeHtml((stats.changed ?? 0) + (stats.added ?? 0) + (stats.removed ?? 0))}</div>
+          <div class="meta">${escapeHtml(diff.summary)}</div>
+        </div>
+        <p class="subhead">Analyst Readout</p>
+        <div class="list">${takeaways.map(item => `<div class="item"><div class="meta">${escapeHtml(item)}</div></div>`).join('') || '<div class="item"><div class="meta">No automated interpretation yet.</div></div>'}</div>
+        <div class="cards">
+          <div class="item">
+            <strong>From v${escapeHtml(stats.from_version)}</strong>
+            <div class="pill ${fromDocument.status === 'active' ? 'ok' : 'warn'}">${escapeHtml(fromDocument.status || 'n/a')}</div>
+            <div class="meta">published=${escapeHtml(fromDocument.published_at || 'n/a')}
+slices=${escapeHtml(stats.from_slice_count ?? 0)}
+summary=${escapeHtml(fromDocument.summary || '')}</div>
+          </div>
+          <div class="item">
+            <strong>To v${escapeHtml(stats.to_version)}</strong>
+            <div class="pill ${toDocument.status === 'active' ? 'ok' : 'warn'}">${escapeHtml(toDocument.status || 'n/a')}</div>
+            <div class="meta">published=${escapeHtml(toDocument.published_at || 'n/a')}
+slices=${escapeHtml(stats.to_slice_count ?? 0)}
+summary=${escapeHtml(toDocument.summary || '')}</div>
+          </div>
+        </div>
+        <p class="subhead">Document Changes</p>
+        <div class="list">${documentChanges.map(item => `<div class="item"><strong>${escapeHtml(item.field)}</strong><div class="meta">${escapeHtml(item.from ?? 'n/a')} -> ${escapeHtml(item.to ?? 'n/a')}</div></div>`).join('') || '<div class="item"><div class="meta">No top-level document fields changed.</div></div>'}</div>
+        <p class="subhead">Added Slices</p>
+        <div class="list">${addedSlices.map(item => `<div class="item"><strong>${escapeHtml(item.title)}</strong><div class="pill ok">${escapeHtml(item.layer)}</div><div class="meta">${escapeHtml(item.claim)}</div></div>`).join('') || '<div class="item"><div class="meta">No slices added.</div></div>'}</div>
+        <p class="subhead">Removed Slices</p>
+        <div class="list">${removedSlices.map(item => `<div class="item"><strong>${escapeHtml(item.title)}</strong><div class="pill warn">${escapeHtml(item.layer)}</div><div class="meta">${escapeHtml(item.claim)}</div></div>`).join('') || '<div class="item"><div class="meta">No slices removed.</div></div>'}</div>
+        <p class="subhead">Changed Slices</p>
+        <div class="list">${changedSlices.map(item => `<div class="item"><strong>${escapeHtml(item.title)}</strong><div class="pill">${escapeHtml(item.layer)}</div><div class="meta">${item.changes.map(change => `${escapeHtml(change.field)}: ${escapeHtml(change.from ?? 'n/a')} -> ${escapeHtml(change.to ?? 'n/a')}`).join('\\n')}</div></div>`).join('') || '<div class="item"><div class="meta">No matched slices changed in place.</div></div>'}</div>
+      `;
+    }
+
     async function loadSnapshot() {
       const params = new URLSearchParams({
         market: document.getElementById('filterMarket').value,
@@ -876,17 +1001,25 @@ trajectory=${escapeHtml(company.trajectory_score ?? 'n/a')}</div>
       const entityId = document.getElementById('filterEntityId').value;
       const layer = document.getElementById('filterLayer').value;
       const topicKey = document.getElementById('filterTopicKey').value;
+      const fromVersion = document.getElementById('diffFromVersion').value;
+      const toVersion = document.getElementById('diffToVersion').value;
       if (poolId) params.set('pool_id', poolId);
       if (entityId) params.set('entity_id', entityId);
       if (layer) params.set('layer', layer);
-      if (topicKey) params.set('topic_key', topicKey);
+      if (topicKey) {
+        params.set('topic_key', topicKey);
+        if (fromVersion) params.set('from_version', fromVersion);
+        if (toVersion) params.set('to_version', toVersion);
+      }
       const data = await api('/api/snapshot?' + params.toString());
 
       document.querySelector('.hero h1').textContent = 'AI Stock Agent Workbench';
       document.querySelector('.hero p').textContent = 'Run the workflow, manage the knowledge base, inspect pool members, review evidence, and track topic versions from one local browser workbench.';
       applySnapshotToSelectors(data);
+      syncDiffVersionSelectors(data);
       renderPoolStats(data.pool_summary);
       renderCompanyDetail(data.company_detail);
+      renderTopicDiff(data.topic_diff);
 
       renderItems('poolCompaniesList', data.pool_companies, item => `
         <strong>${escapeHtml(item.company_name)} (${escapeHtml(item.ticker)})</strong>
@@ -906,6 +1039,7 @@ official=${escapeHtml(item.official_evidence_count || 0)}</div>
         <div class="pill ${item.latest_status === 'active' ? 'ok' : 'warn'}">${escapeHtml(item.latest_status)}</div>
         <div class="meta">${item.versions.map(version => `v${version.version} ${version.status} slices=${version.slice_count}`).join('\\n')}</div>
         <button class="ghost" onclick="focusTopic('${escapeHtml(item.topic_key)}')">Focus Topic</button>
+        <button class="secondary" onclick="compareTopic('${escapeHtml(item.topic_key)}')">Compare Latest</button>
       `);
       renderItems('evidenceList', data.evidence_summaries, item => `
         <strong>${escapeHtml(item.entity_id || item.scope)}</strong>
@@ -1092,7 +1226,44 @@ ${escapeHtml(payload.reason)}</div>
 
     function focusTopic(topicKey) {
       document.getElementById('filterTopicKey').value = topicKey;
+      clearDiffVersionSelectors();
       loadSnapshot().catch(error => setStatus(String(error)));
+    }
+
+    function compareTopic(topicKey) {
+      document.getElementById('filterTopicKey').value = topicKey;
+      clearDiffVersionSelectors();
+      loadSnapshot()
+        .then(() => setStatus(`Loaded version diff for ${topicKey}.`))
+        .catch(error => setStatus(String(error)));
+    }
+
+    function loadSelectedDiff() {
+      const topicKey = document.getElementById('filterTopicKey').value;
+      const fromVersion = document.getElementById('diffFromVersion').value;
+      const toVersion = document.getElementById('diffToVersion').value;
+      if (!topicKey) {
+        setStatus('Focus a topic before comparing versions.');
+        return;
+      }
+      if (fromVersion && toVersion && fromVersion === toVersion) {
+        setStatus('Choose two different versions to compare.');
+        return;
+      }
+      if (fromVersion && toVersion && Number(fromVersion) > Number(toVersion)) {
+        setStatus('Choose an older "from" version and a newer "to" version.');
+        return;
+      }
+      loadSnapshot()
+        .then(() => setStatus(`Loaded custom diff for ${topicKey}.`))
+        .catch(error => setStatus(String(error)));
+    }
+
+    function resetTopicDiff() {
+      clearDiffVersionSelectors();
+      loadSnapshot()
+        .then(() => setStatus('Loaded latest-vs-previous diff.'))
+        .catch(error => setStatus(String(error)));
     }
 
     function selectEntity(entityId) {
@@ -1101,6 +1272,7 @@ ${escapeHtml(payload.reason)}</div>
       loadSnapshot().catch(error => setStatus(String(error)));
     }
 
+    clearDiffVersionSelectors();
     loadSnapshot()
       .then(() => prepNotebooklm())
       .catch(error => setStatus(String(error)));
@@ -1137,6 +1309,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8") if length else "{}"
         return json.loads(raw or "{}")
 
+    @staticmethod
+    def _read_optional_int(value: str | None) -> int | None:
+        if value in {None, ""}:
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            return None
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/":
@@ -1149,6 +1330,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 market=params.get("market", ["cn"])[0],
                 pool_id=params.get("pool_id", [None])[0],
                 topic_key=params.get("topic_key", [None])[0],
+                from_version=self._read_optional_int(params.get("from_version", [None])[0]),
+                to_version=self._read_optional_int(params.get("to_version", [None])[0]),
                 layer=params.get("layer", [None])[0],
                 status=params.get("status", ["all"])[0],
                 theme=params.get("theme", [""])[0],

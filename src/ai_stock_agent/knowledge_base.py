@@ -590,6 +590,251 @@ def resolve_document_version(
     )
 
 
+def _slice_match_key(item: KnowledgeSlice) -> tuple[Any, ...]:
+    return (
+        item.layer,
+        item.subtype,
+        item.collection_key,
+        item.principle_type or "",
+        item.market_scope,
+        tuple(sorted(item.entity_tags)),
+        item.title.casefold(),
+    )
+
+
+def _slice_change_fields(previous: KnowledgeSlice, current: KnowledgeSlice) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    comparable_fields = (
+        ("claim", previous.claim, current.claim),
+        ("slice_text", previous.slice_text, current.slice_text),
+        ("stance", previous.stance, current.stance),
+        ("confidence", previous.confidence, current.confidence),
+        ("crowding_score", previous.crowding_score, current.crowding_score),
+        ("status", previous.status, current.status),
+        ("topic_tags", previous.topic_tags, current.topic_tags),
+        ("entity_tags", previous.entity_tags, current.entity_tags),
+        ("action_binding", previous.action_binding, current.action_binding),
+    )
+    for field, old_value, new_value in comparable_fields:
+        if old_value == new_value:
+            continue
+        changes.append(
+            {
+                "field": field,
+                "from": old_value,
+                "to": new_value,
+            }
+        )
+    return changes
+
+
+def _build_diff_takeaways(
+    *,
+    from_document: KnowledgeDocument,
+    to_document: KnowledgeDocument,
+    added_slices: list[dict[str, Any]],
+    removed_slices: list[dict[str, Any]],
+    changed_slices: list[dict[str, Any]],
+    document_changes: list[dict[str, Any]],
+) -> list[str]:
+    takeaways: list[str] = []
+
+    if added_slices or removed_slices:
+        added_layers = sorted({str(item.get("layer") or "unknown") for item in added_slices})
+        removed_layers = sorted({str(item.get("layer") or "unknown") for item in removed_slices})
+        parts: list[str] = []
+        if added_layers:
+            parts.append(f"新增了 {', '.join(added_layers)} 层的观点")
+        if removed_layers:
+            parts.append(f"移除了 {', '.join(removed_layers)} 层的旧观点")
+        if parts:
+            takeaways.append("；".join(parts) + "。")
+
+    consensus_changes = [
+        item
+        for item in changed_slices
+        if item.get("layer") == "consensus"
+    ]
+    crowding_increase = False
+    for item in consensus_changes:
+        for change in item.get("changes", []):
+            if change.get("field") == "crowding_score":
+                old_value = float(change.get("from") or 0.0)
+                new_value = float(change.get("to") or 0.0)
+                if new_value > old_value:
+                    crowding_increase = True
+                    break
+        if crowding_increase:
+            break
+    if crowding_increase:
+        takeaways.append("共识层的拥挤度在上升，说明主题叙事可能从方向判断转向交易风险判断。")
+
+    stance_changes = []
+    for item in changed_slices:
+        for change in item.get("changes", []):
+            if change.get("field") == "stance":
+                stance_changes.append((item.get("title"), change.get("from"), change.get("to")))
+    if stance_changes:
+        title, old_stance, new_stance = stance_changes[0]
+        takeaways.append(f"{title} 的立场从 {old_stance} 变为 {new_stance}，这通常意味着该 topic 的解读框架已经改变。")
+
+    if any(item.get("field") == "summary" for item in document_changes):
+        takeaways.append("文档摘要本身发生了变化，说明这不是单纯的元数据更新，而是作者想强调的新结论发生了改变。")
+
+    if from_document.summary != to_document.summary and not takeaways:
+        takeaways.append("这个 topic 的核心表述已经更新，建议结合左右版本摘要重新检查它是否仍适合作为当前研究前提。")
+
+    return takeaways[:4]
+
+
+def build_topic_version_diff(
+    *,
+    documents: list[KnowledgeDocument],
+    slices: list[KnowledgeSlice],
+    topic_key: str,
+    region: str = "cn",
+    from_version: int | None = None,
+    to_version: int | None = None,
+) -> dict[str, Any] | None:
+    matched_documents = [
+        item
+        for item in documents
+        if item.topic_key == topic_key and item.region == region
+    ]
+    if len(matched_documents) < 2:
+        return None
+
+    ordered = sorted(matched_documents, key=lambda item: (item.version, item.created_at))
+    available_versions = [
+        {
+            "document_id": item.document_id,
+            "version": item.version,
+            "status": item.status,
+            "published_at": item.published_at,
+            "created_at": item.created_at,
+        }
+        for item in reversed(ordered)
+    ]
+    to_document = next((item for item in ordered if item.version == to_version), ordered[-1]) if to_version else ordered[-1]
+    previous_candidates = [item for item in ordered if item.version < to_document.version]
+    if not previous_candidates:
+        return None
+    from_document = (
+        next((item for item in previous_candidates if item.version == from_version), previous_candidates[-1])
+        if from_version
+        else previous_candidates[-1]
+    )
+
+    from_slices = [
+        item
+        for item in slices
+        if item.document_id == from_document.document_id
+    ]
+    to_slices = [
+        item
+        for item in slices
+        if item.document_id == to_document.document_id
+    ]
+
+    from_by_key = {_slice_match_key(item): item for item in from_slices}
+    to_by_key = {_slice_match_key(item): item for item in to_slices}
+    all_keys = sorted(set(from_by_key) | set(to_by_key))
+
+    added_slices: list[dict[str, Any]] = []
+    removed_slices: list[dict[str, Any]] = []
+    changed_slices: list[dict[str, Any]] = []
+    for key in all_keys:
+        previous = from_by_key.get(key)
+        current = to_by_key.get(key)
+        if previous is None and current is not None:
+            added_slices.append(current.model_dump(mode="json"))
+            continue
+        if current is None and previous is not None:
+            removed_slices.append(previous.model_dump(mode="json"))
+            continue
+        if previous is None or current is None:
+            continue
+        changes = _slice_change_fields(previous, current)
+        if not changes:
+            continue
+        changed_slices.append(
+            {
+                "slice_id": current.slice_id,
+                "match_key": list(key),
+                "title": current.title,
+                "layer": current.layer,
+                "subtype": current.subtype,
+                "from_slice": previous.model_dump(mode="json"),
+                "to_slice": current.model_dump(mode="json"),
+                "changes": changes,
+            }
+        )
+
+    document_changes: list[dict[str, Any]] = []
+    document_fields = (
+        ("title", from_document.title, to_document.title),
+        ("summary", from_document.summary, to_document.summary),
+        ("status", from_document.status, to_document.status),
+        ("published_at", from_document.published_at, to_document.published_at),
+        ("source_name", from_document.source_name, to_document.source_name),
+        ("source_type", from_document.source_type, to_document.source_type),
+        ("tags", from_document.tags, to_document.tags),
+    )
+    for field, old_value, new_value in document_fields:
+        if old_value == new_value:
+            continue
+        document_changes.append(
+            {
+                "field": field,
+                "from": old_value,
+                "to": new_value,
+            }
+        )
+
+    summary_parts = [
+        f"v{from_document.version} -> v{to_document.version}",
+        f"+{len(added_slices)} added",
+        f"-{len(removed_slices)} removed",
+        f"~{len(changed_slices)} changed",
+    ]
+    if document_changes:
+        summary_parts.append(f"{len(document_changes)} document fields updated")
+
+    takeaways = _build_diff_takeaways(
+        from_document=from_document,
+        to_document=to_document,
+        added_slices=added_slices,
+        removed_slices=removed_slices,
+        changed_slices=changed_slices,
+        document_changes=document_changes,
+    )
+
+    return {
+        "topic_key": topic_key,
+        "region": region,
+        "title": to_document.title,
+        "summary": ", ".join(summary_parts),
+        "takeaways": takeaways,
+        "available_versions": available_versions,
+        "from_document": from_document.model_dump(mode="json"),
+        "to_document": to_document.model_dump(mode="json"),
+        "document_changes": document_changes,
+        "added_slices": added_slices,
+        "removed_slices": removed_slices,
+        "changed_slices": changed_slices,
+        "stats": {
+            "from_version": from_document.version,
+            "to_version": to_document.version,
+            "added": len(added_slices),
+            "removed": len(removed_slices),
+            "changed": len(changed_slices),
+            "document_fields_changed": len(document_changes),
+            "from_slice_count": len(from_slices),
+            "to_slice_count": len(to_slices),
+        },
+    }
+
+
 def _region_compatible(slice_region: str, market: str) -> bool:
     normalized = slice_region.lower()
     if normalized in {"all", "global"}:
