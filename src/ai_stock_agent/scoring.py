@@ -121,6 +121,34 @@ def compute_staleness_penalty(packet: FrozenQuantPacket, policy: WeightCalibrati
     return round(penalty, 2), level
 
 
+def _entity_aliases(entity: EntityProfile) -> set[str]:
+    aliases = {
+        entity.entity_id.lower(),
+        entity.ticker.lower(),
+        entity.ticker.lower().split(".", 1)[0],
+    }
+    digits = "".join(char for char in entity.ticker if char.isdigit())
+    if digits:
+        aliases.add(digits)
+    return aliases
+
+
+def _relevant_topic_version_signals(
+    knowledge_context: KnowledgeContextRecord | None,
+    entity: EntityProfile,
+) -> list[dict[str, object]]:
+    if knowledge_context is None:
+        return []
+    entity_aliases = _entity_aliases(entity)
+    signals: list[dict[str, object]] = []
+    for item in knowledge_context.topic_version_signals:
+        applies_to_all = bool(item.get("applies_to_all"))
+        signal_aliases = {str(value).lower() for value in item.get("entity_aliases", [])}
+        if applies_to_all or entity_aliases.intersection(signal_aliases):
+            signals.append(item)
+    return signals
+
+
 def compute_scorecard(
     entity: EntityProfile,
     packet: FrozenQuantPacket,
@@ -179,6 +207,10 @@ def compute_scorecard(
     knowledge_macro_overlay = 0.0
     knowledge_crowding_penalty = 0.0
     knowledge_principle_penalty = 0.0
+    topic_diff_penalty = 0.0
+    topic_diff_bonus = 0.0
+    topic_diff_topics: list[str] = []
+    topic_diff_flags: list[str] = []
     if evidence_summary is not None:
         if evidence_summary.overall_confidence < 0.5:
             macro_alignment -= 4
@@ -211,6 +243,24 @@ def compute_scorecard(
         )
         if "valuation_discipline" in knowledge_context.principle_signal.risk_flags and entity.valuation_score < 62:
             knowledge_principle_penalty += 1.5
+        for signal in _relevant_topic_version_signals(knowledge_context, entity):
+            relevance = float(signal.get("relevance_score") or 0.0)
+            flags = {str(flag) for flag in signal.get("risk_flags", [])}
+            topic_key = str(signal.get("topic_key") or "unknown_topic")
+            topic_diff_topics.append(topic_key)
+            topic_diff_flags.extend(sorted(flags))
+            if "consensus_crowding_up" in flags:
+                topic_diff_penalty += 1.8 + relevance * (4.4 if is_challenger else 3.2)
+            if "stance_deteriorated" in flags:
+                topic_diff_penalty += relevance * 4.0
+            if "principle_updated" in flags and entity.valuation_score < 68:
+                topic_diff_penalty += relevance * 2.5
+            if "stance_improved" in flags and "consensus_crowding_up" not in flags:
+                topic_diff_bonus += relevance * 2.0
+        topic_diff_penalty = round(min(topic_diff_penalty, 12.0), 2)
+        topic_diff_bonus = round(min(topic_diff_bonus, 4.0), 2)
+        if topic_diff_bonus:
+            macro_alignment += topic_diff_bonus
 
     quality_component = (
         entity.base_quality * (policy.fundamental_cap / 100)
@@ -233,6 +283,8 @@ def compute_scorecard(
             trajectory_score = clamp(trajectory_score - 5)
     if knowledge_crowding_penalty:
         trajectory_score = clamp(trajectory_score - knowledge_crowding_penalty)
+    if topic_diff_penalty:
+        trajectory_score = clamp(trajectory_score - topic_diff_penalty)
     if breadth_thrust is not None:
         if breadth_thrust < 40 and is_challenger:
             trajectory_score = clamp(trajectory_score - 4)
@@ -268,6 +320,10 @@ def compute_scorecard(
         retention_priority_score = clamp(retention_priority_score - knowledge_crowding_penalty)
     if knowledge_principle_penalty:
         retention_priority_score = clamp(retention_priority_score - knowledge_principle_penalty)
+    if topic_diff_penalty:
+        retention_priority_score = clamp(retention_priority_score - topic_diff_penalty)
+    if topic_diff_bonus:
+        retention_priority_score = clamp(retention_priority_score + topic_diff_bonus * 0.5)
 
     return ScoreCard(
         entity_id=entity.entity_id,
@@ -293,6 +349,10 @@ def compute_scorecard(
             f"knowledge_macro_overlay={knowledge_macro_overlay:.2f}",
             f"knowledge_crowding_penalty={knowledge_crowding_penalty:.2f}",
             f"knowledge_principle_penalty={knowledge_principle_penalty:.2f}",
+            f"topic_diff_penalty={topic_diff_penalty:.2f}",
+            f"topic_diff_bonus={topic_diff_bonus:.2f}",
+            f"topic_diff_topics={','.join(sorted(set(topic_diff_topics))) or 'na'}",
+            f"topic_diff_flags={','.join(sorted(set(topic_diff_flags))) or 'na'}",
             f"knowledge_consensus_mode={knowledge_context.consensus_signal.action_mode if knowledge_context is not None else 'na'}",
             f"knowledge_principle_mode={knowledge_context.principle_signal.action_mode if knowledge_context is not None else 'na'}",
             f"prescreen_multiplier={prescreen_multiplier:.2f}",

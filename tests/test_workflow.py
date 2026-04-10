@@ -2375,6 +2375,59 @@ class WorkflowTestCase(unittest.TestCase):
         self.assertLess(context.principle_signal.score, 0)
         self.assertIn("valuation_discipline", context.principle_signal.risk_flags)
 
+    def test_knowledge_context_builds_topic_version_signals(self) -> None:
+        first_document, first_slices, _ = ingest_knowledge_payload(
+            {
+                "title": "Eoptolink consensus memo",
+                "topic_key": "eoptolink_ai_optics",
+                "source_name": "desk_note",
+                "source_type": "curated_note",
+                "region": "cn",
+                "published_at": "2026-03-10T09:00:00Z",
+                "content": (
+                    "300502.SZ Eoptolink demand remains supportive and AI optical module demand is improving."
+                ),
+            }
+        )
+        second_document, second_slices, _ = ingest_knowledge_payload(
+            {
+                "title": "Eoptolink consensus memo",
+                "topic_key": "eoptolink_ai_optics",
+                "source_name": "desk_note",
+                "source_type": "curated_note",
+                "region": "cn",
+                "published_at": "2026-03-14T09:00:00Z",
+                "content": (
+                    "300502.SZ Eoptolink is now crowded and much of the optimism is priced in. "
+                    "My investment principle is to wait for a better margin of safety."
+                ),
+            }
+        )
+        second_document = second_document.model_copy(update={"version": 2, "supersedes_document_id": first_document.document_id})
+        second_slices = [
+            item.model_copy(
+                update={
+                    "document_id": second_document.document_id,
+                    "topic_key": second_document.topic_key,
+                    "version": 2,
+                }
+            )
+            for item in second_slices
+        ]
+        context = build_knowledge_context(
+            run_id="run_demo",
+            macro_theme="China AI optical link resilience",
+            market="cn",
+            documents=[first_document, second_document],
+            slices=[*first_slices, *second_slices],
+            policy=default_knowledge_policy(),
+            wake_entity_ids=["eoptolink_cn", "300502.SZ"],
+        )
+        self.assertTrue(context.topic_version_signals)
+        self.assertIsNotNone(context.topic_version_summary)
+        self.assertIn("topic_version_diff=", context.overall_summary)
+        self.assertIn("consensus_crowding_up", context.topic_version_signals[0]["risk_flags"])
+
     def test_scorecard_applies_knowledge_crowding_penalty(self) -> None:
         from ai_stock_agent.models import WeightCalibrationPolicy
 
@@ -2461,6 +2514,114 @@ class WorkflowTestCase(unittest.TestCase):
         self.assertLess(adjusted.retention_priority_score, baseline.retention_priority_score)
         self.assertTrue(any("knowledge_crowding_penalty=" in note for note in adjusted.notes))
 
+    def test_scorecard_applies_topic_version_diff_penalty(self) -> None:
+        from ai_stock_agent.models import WeightCalibrationPolicy
+
+        entity = EntityProfile(
+            entity_id="eoptolink_cn",
+            ticker="300502.SZ",
+            company_name="Eoptolink",
+            sector="Optical Module",
+            market_cap=132_000_000_000,
+            liquidity_score=78,
+            info_score=75,
+            tradability_score=79,
+            base_quality=77,
+            industry_position_score=82,
+            macro_alignment_score=89,
+            valuation_score=61,
+            catalyst_score=80,
+            risk_penalty=43,
+            evidence_freshness_days=9,
+            active_factor_exposures=["ai_server", "optical_interconnect"],
+        )
+
+        class StubManager:
+            @staticmethod
+            def get_entity_filing_metrics(entity: EntityProfile):
+                from ai_stock_agent.models import AdapterPayload, DataSourceHealthRecord, DataSourceManifestItem, SourceType
+
+                return AdapterPayload(
+                    data_domain="filing_metrics",
+                    values={"data_freshness_hours": 4},
+                    source_manifest=[
+                        DataSourceManifestItem(
+                            source_name="stub_filing",
+                            source_type=SourceType.FILING,
+                            as_of=datetime.now(),
+                            field_coverage=0.95,
+                        )
+                    ],
+                    health_record=DataSourceHealthRecord(
+                        record_id="health_stub_topic_diff",
+                        data_domain="filing_metrics",
+                        primary_source="stub_filing",
+                        field_completeness=0.95,
+                        latency_hours=4,
+                        status="healthy",
+                        degradation_path="direct",
+                    ),
+                )
+
+        packet = build_frozen_packet(entity, StubManager())
+        first_document, first_slices, _ = ingest_knowledge_payload(
+            {
+                "title": "Eoptolink consensus memo",
+                "topic_key": "eoptolink_ai_optics",
+                "source_name": "desk_note",
+                "source_type": "curated_note",
+                "region": "cn",
+                "published_at": "2026-03-10T09:00:00Z",
+                "content": "300502.SZ Eoptolink demand remains supportive and AI optical module demand is improving.",
+            }
+        )
+        second_document, second_slices, _ = ingest_knowledge_payload(
+            {
+                "title": "Eoptolink consensus memo",
+                "topic_key": "eoptolink_ai_optics",
+                "source_name": "desk_note",
+                "source_type": "curated_note",
+                "region": "cn",
+                "published_at": "2026-03-14T09:00:00Z",
+                "content": (
+                    "300502.SZ Eoptolink is now crowded and much of the optimism is priced in. "
+                    "My investment principle is to wait for a better margin of safety."
+                ),
+            }
+        )
+        second_document = second_document.model_copy(update={"version": 2, "supersedes_document_id": first_document.document_id})
+        second_slices = [
+            item.model_copy(
+                update={
+                    "document_id": second_document.document_id,
+                    "topic_key": second_document.topic_key,
+                    "version": 2,
+                }
+            )
+            for item in second_slices
+        ]
+        knowledge_context = build_knowledge_context(
+            run_id="run_demo",
+            macro_theme="China AI optical link resilience",
+            market="cn",
+            documents=[first_document, second_document],
+            slices=[*first_slices, *second_slices],
+            policy=default_knowledge_policy(),
+            wake_entity_ids=["eoptolink_cn", "300502.SZ"],
+        )
+        baseline = compute_scorecard(entity, packet, WeightCalibrationPolicy(), True)
+        adjusted = compute_scorecard(
+            entity,
+            packet,
+            WeightCalibrationPolicy(),
+            True,
+            knowledge_context=knowledge_context,
+        )
+        self.assertLess(adjusted.trajectory_score, baseline.trajectory_score)
+        self.assertLess(adjusted.retention_priority_score, baseline.retention_priority_score)
+        self.assertTrue(any("topic_diff_penalty=" in note for note in adjusted.notes))
+        self.assertTrue(any("topic_diff_topics=eoptolink_ai_optics" in note for note in adjusted.notes))
+
     def test_knowledge_records_persist_in_store(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "agent.db")
@@ -2521,6 +2682,71 @@ class WorkflowTestCase(unittest.TestCase):
             self.assertIn("knowledge_context", result)
             self.assertTrue(store.list_knowledge_contexts())
             self.assertTrue(any(note.startswith("knowledge_overlay=") for note in result["merge_notes"]))
+
+    def test_workflow_topic_version_diff_blocks_challenger_promotion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = str(Path(tmpdir) / "agent.db")
+            bootstrap_demo_data(db_path)
+            store = SQLiteStateStore(db_path)
+            first_document, first_slices, first_collections = ingest_knowledge_payload(
+                {
+                    "title": "Eoptolink consensus memo",
+                    "topic_key": "eoptolink_ai_optics",
+                    "source_name": "desk_note",
+                    "source_type": "curated_note",
+                    "region": "cn",
+                    "published_at": "2026-03-10T09:00:00Z",
+                    "content": "300502.SZ Eoptolink demand remains supportive and AI optical module demand is improving.",
+                }
+            )
+            second_document, second_slices, second_collections = ingest_knowledge_payload(
+                {
+                    "title": "Eoptolink consensus memo",
+                    "topic_key": "eoptolink_ai_optics",
+                    "source_name": "desk_note",
+                    "source_type": "curated_note",
+                    "region": "cn",
+                    "published_at": "2026-03-14T09:00:00Z",
+                    "content": (
+                        "300502.SZ Eoptolink is now crowded and much of the optimism is priced in. "
+                        "My investment principle is to wait for a better margin of safety."
+                    ),
+                }
+            )
+            second_document = second_document.model_copy(update={"version": 2, "supersedes_document_id": first_document.document_id})
+            second_slices = [
+                item.model_copy(
+                    update={
+                        "document_id": second_document.document_id,
+                        "topic_key": second_document.topic_key,
+                        "version": 2,
+                    }
+                )
+                for item in second_slices
+            ]
+            for document in (first_document, second_document):
+                store.save_knowledge_document(document)
+            for item in [*first_slices, *second_slices]:
+                store.save_knowledge_slice(item)
+            for item in [*first_collections, *second_collections]:
+                store.save_knowledge_collection(item)
+            store.save_knowledge_policy(default_knowledge_policy())
+
+            result = run_mvp_workflow(
+                db_path=db_path,
+                run_mode="event_driven_refresh",
+                universe_id="cn_macro_ai",
+                pool_id="cn_macro_ai_pool",
+                macro_theme="China AI optical link resilience",
+                incoming_events=[{"event_type": "news", "ticker": "300502.SZ", "source_ref": "test"}],
+            )
+            self.assertTrue(result["knowledge_context"].topic_version_signals)
+            prescreen = result["prescreen_results"].get("eoptolink_cn")
+            self.assertIsNotNone(prescreen)
+            self.assertIn("topic_diff_crowding_shift", prescreen.blocked_reasons)
+            self.assertFalse(prescreen.passed)
+            self.assertTrue(any(note.startswith("topic_version_diff=") for note in result["run_state"].decision_output["notes"]))
+            self.assertTrue(any("topic_diff_gate=" in note for note in result["run_state"].decision_output["notes"]))
 
     def test_tushare_probe_reports_partial_ready_profile(self) -> None:
         class FakeFrame:

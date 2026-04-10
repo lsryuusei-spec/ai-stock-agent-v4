@@ -234,6 +234,98 @@ def _knowledge_entity_tags(state: WorkflowState) -> list[str]:
     return sorted(aliases)
 
 
+def _entity_runtime_aliases(entity: EntityProfile) -> set[str]:
+    aliases = {
+        entity.entity_id.lower(),
+        entity.ticker.lower(),
+        entity.ticker.lower().split(".", 1)[0],
+    }
+    digits = "".join(char for char in entity.ticker if char.isdigit())
+    if digits:
+        aliases.add(digits)
+    return aliases
+
+
+def _topic_diff_signals_for_entity(state: WorkflowState, entity_id: str) -> list[dict[str, Any]]:
+    knowledge_context = state.get("knowledge_context")
+    entity = state["entity_map"].get(entity_id)
+    if knowledge_context is None or entity is None:
+        return []
+    aliases = _entity_runtime_aliases(entity)
+    signals: list[dict[str, Any]] = []
+    for item in knowledge_context.topic_version_signals:
+        applies_to_all = bool(item.get("applies_to_all"))
+        signal_aliases = {str(value).lower() for value in item.get("entity_aliases", [])}
+        if applies_to_all or aliases.intersection(signal_aliases):
+            signals.append(item)
+    signals.sort(
+        key=lambda item: (float(item.get("relevance_score") or 0.0), float(item.get("change_magnitude") or 0.0)),
+        reverse=True,
+    )
+    return signals
+
+
+def _topic_diff_gate(
+    state: WorkflowState,
+    entity_id: str,
+    *,
+    target_bucket: Bucket | None = None,
+) -> tuple[bool, str | None, str | None]:
+    entity = state["entity_map"].get(entity_id)
+    if entity is None:
+        return True, None, None
+    signals = _topic_diff_signals_for_entity(state, entity_id)
+    if not signals:
+        return True, None, None
+    topic_keys = ",".join(sorted({str(item.get("topic_key") or "unknown_topic") for item in signals[:3]}))
+    high_crowding = next(
+        (
+            item
+            for item in signals
+            if "consensus_crowding_up" in item.get("risk_flags", [])
+            and float(item.get("relevance_score") or 0.0) >= 0.32
+        ),
+        None,
+    )
+    deteriorated = next(
+        (
+            item
+            for item in signals
+            if "stance_deteriorated" in item.get("risk_flags", [])
+            and float(item.get("relevance_score") or 0.0) >= 0.28
+        ),
+        None,
+    )
+    principle_update = next(
+        (
+            item
+            for item in signals
+            if "principle_updated" in item.get("risk_flags", [])
+            and float(item.get("relevance_score") or 0.0) >= 0.24
+        ),
+        None,
+    )
+    if high_crowding is not None and entity.risk_penalty >= 35:
+        return (
+            False,
+            f"{entity_id} topic_diff_gate=crowding_shift topics={topic_keys}",
+            "topic_diff_crowding_shift",
+        )
+    if deteriorated is not None and entity.valuation_score < 70:
+        return (
+            False,
+            f"{entity_id} topic_diff_gate=thesis_reframed topics={topic_keys}",
+            "topic_diff_thesis_reframed",
+        )
+    if target_bucket == Bucket.CORE_TRACKING and principle_update is not None and entity.valuation_score < 72:
+        return (
+            False,
+            f"{entity_id} topic_diff_gate=principle_update topics={topic_keys}",
+            "topic_diff_principle_update",
+        )
+    return True, None, None
+
+
 def _resolve_pool_for_entity(
     store: SQLiteStateStore,
     entity_id: str,
@@ -430,6 +522,7 @@ def _knowledge_overlay(state: WorkflowState) -> WorkflowState:
         run_id=state["run_state"].run_id,
         macro_theme=state["run_state"].macro_theme,
         market=state["universe"].market,
+        documents=store.list_knowledge_documents(),
         slices=store.list_knowledge_slices(),
         policy=policy,
         wake_entity_ids=_knowledge_entity_tags(state),
@@ -442,6 +535,8 @@ def _knowledge_overlay(state: WorkflowState) -> WorkflowState:
         f"consensus:{knowledge_context.consensus_signal.score:.2f},"
         f"principle:{knowledge_context.principle_signal.score:.2f}"
     )
+    if knowledge_context.topic_version_summary:
+        notes.append(knowledge_context.topic_version_summary)
     return {"knowledge_context": knowledge_context, "merge_notes": notes}
 
 
@@ -546,6 +641,20 @@ def _n6_challenger_prescreen(state: WorkflowState) -> WorkflowState:
             factor_registry=state["factor_registry"],
             policy=policy,
         )
+        allowed, gate_note, blocked_reason = _topic_diff_gate(state, entity_id)
+        if not allowed:
+            blocked_reasons = list(dict.fromkeys([*decision.blocked_reasons, blocked_reason] if blocked_reason else decision.blocked_reasons))
+            decision = decision.model_copy(
+                update={
+                    "passed": False,
+                    "decision": "shadow_watch",
+                    "eligible_route": CurrentRoute.SHADOW_OBSERVATION,
+                    "blocked_reasons": blocked_reasons,
+                    "confidence_multiplier": round(max(0.45, decision.confidence_multiplier * 0.82), 4),
+                }
+            )
+            if gate_note:
+                merge_notes.append(gate_note)
         prescreen_results[entity_id] = decision
         store.save_prescreen_decision(decision)
         if decision.passed:
@@ -688,6 +797,9 @@ def _challenger_promotion_allowed(state: WorkflowState, entity_id: str) -> tuple
         or summary.overall_confidence < EVIDENCE_PROMOTION_MIN_CONFIDENCE
     ):
         return False, _promotion_gate_note(entity_id, summary)
+    allowed, gate_note, _ = _topic_diff_gate(state, entity_id, target_bucket=Bucket.SECONDARY_CANDIDATES)
+    if not allowed:
+        return False, gate_note
     knowledge_context = state.get("knowledge_context")
     entity = state["entity_map"].get(entity_id)
     if knowledge_context is not None and entity is not None:
@@ -721,6 +833,9 @@ def _incumbent_upgrade_allowed(
         or summary.overall_confidence < EVIDENCE_PROMOTION_MIN_CONFIDENCE
     ):
         return current_bucket, f"{entity_id} evidence_gate={summary.confidence_label}:{summary.overall_confidence:.2f} core_upgrade_blocked"
+    allowed, gate_note, _ = _topic_diff_gate(state, entity_id, target_bucket=Bucket.CORE_TRACKING)
+    if not allowed:
+        return current_bucket, gate_note
     return target_bucket, None
 
 

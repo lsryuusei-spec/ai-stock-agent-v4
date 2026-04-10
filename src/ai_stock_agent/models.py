@@ -431,6 +431,8 @@ class KnowledgeContextRecord(BaseModel):
     consensus_signal: KnowledgeLayerInsight
     principle_signal: KnowledgeLayerInsight
     overall_summary: str
+    topic_version_signals: list[dict[str, Any]] = Field(default_factory=list)
+    topic_version_summary: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 

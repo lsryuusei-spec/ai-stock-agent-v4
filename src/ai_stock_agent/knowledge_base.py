@@ -696,10 +696,11 @@ def build_topic_version_diff(
     from_version: int | None = None,
     to_version: int | None = None,
 ) -> dict[str, Any] | None:
+    normalized_region = region.lower()
     matched_documents = [
         item
         for item in documents
-        if item.topic_key == topic_key and item.region == region
+        if item.topic_key == topic_key and item.region.lower() == normalized_region
     ]
     if len(matched_documents) < 2:
         return None
@@ -833,6 +834,194 @@ def build_topic_version_diff(
             "to_slice_count": len(to_slices),
         },
     }
+
+
+def _topic_diff_crowding_delta(diff: dict[str, Any]) -> float:
+    delta = 0.0
+    for item in diff.get("changed_slices", []):
+        if item.get("layer") != "consensus":
+            continue
+        for change in item.get("changes", []):
+            if change.get("field") != "crowding_score":
+                continue
+            delta += float(change.get("to") or 0.0) - float(change.get("from") or 0.0)
+    for item in diff.get("added_slices", []):
+        if item.get("layer") == "consensus":
+            delta += float(item.get("crowding_score") or 0.0)
+    for item in diff.get("removed_slices", []):
+        if item.get("layer") == "consensus":
+            delta -= float(item.get("crowding_score") or 0.0)
+    return round(delta, 2)
+
+
+def _topic_diff_stance_shift(diff: dict[str, Any]) -> float:
+    mapping = {"bullish": 1.0, "neutral": 0.0, "bearish": -1.0}
+    shift = 0.0
+    for item in diff.get("changed_slices", []):
+        for change in item.get("changes", []):
+            if change.get("field") != "stance":
+                continue
+            shift += mapping.get(str(change.get("to") or "neutral"), 0.0) - mapping.get(str(change.get("from") or "neutral"), 0.0)
+    for item in diff.get("added_slices", []):
+        shift += mapping.get(str(item.get("stance") or "neutral"), 0.0)
+    for item in diff.get("removed_slices", []):
+        shift -= mapping.get(str(item.get("stance") or "neutral"), 0.0)
+    return round(shift, 2)
+
+
+def _topic_diff_risk_flags(
+    *,
+    diff: dict[str, Any],
+    crowding_delta: float,
+    stance_shift: float,
+    applies_to_all: bool,
+) -> list[str]:
+    flags: list[str] = []
+    if crowding_delta >= 0.12:
+        flags.append("consensus_crowding_up")
+    elif crowding_delta <= -0.12:
+        flags.append("consensus_crowding_down")
+    if stance_shift <= -0.5:
+        flags.append("stance_deteriorated")
+    elif stance_shift >= 0.5:
+        flags.append("stance_improved")
+    if any(item.get("field") == "summary" for item in diff.get("document_changes", [])):
+        flags.append("summary_reframed")
+    if any(item.get("layer") == "principle" for item in diff.get("added_slices", [])):
+        flags.append("principle_updated")
+    if any(item.get("layer") == "principle" for item in diff.get("removed_slices", [])):
+        flags.append("principle_updated")
+    if any(item.get("layer") == "principle" for item in diff.get("changed_slices", [])):
+        flags.append("principle_updated")
+    if applies_to_all:
+        flags.append("macro_relevant")
+    return sorted(set(flags))
+
+
+def build_topic_version_signals(
+    *,
+    documents: list[KnowledgeDocument],
+    slices: list[KnowledgeSlice],
+    macro_theme: str,
+    region: str = "cn",
+    wake_entity_ids: list[str] | None = None,
+    limit: int = 4,
+) -> list[dict[str, Any]]:
+    normalized_region = region.lower()
+    wake_entity_aliases = _entity_aliases(wake_entity_ids or [])
+    macro_terms = _macro_theme_terms(macro_theme)
+    topic_keys = sorted({item.topic_key for item in documents if item.topic_key and item.region.lower() == normalized_region})
+    signals: list[dict[str, Any]] = []
+
+    for topic_key in topic_keys:
+        diff = build_topic_version_diff(documents=documents, slices=slices, topic_key=topic_key, region=normalized_region)
+        if diff is None:
+            continue
+        to_document = diff["to_document"]
+        latest_topic_slices = [
+            item
+            for item in slices
+            if item.document_id == to_document["document_id"]
+        ]
+        topic_tags = sorted({tag for item in latest_topic_slices for tag in item.topic_tags})
+        affected_entities = sorted({tag for item in latest_topic_slices for tag in item.entity_tags})
+        affected_aliases = sorted(_entity_aliases(affected_entities))
+        text_blob = " ".join(
+            [
+                str(diff.get("title") or ""),
+                str(diff.get("summary") or ""),
+                str(to_document.get("summary") or ""),
+                *topic_tags,
+                *[str(item.claim) for item in latest_topic_slices[:3]],
+            ]
+        ).lower()
+        matched_terms = sorted({term for term in macro_terms if term in text_blob})
+        applies_to_all = not affected_entities and bool(matched_terms)
+        relevance_score = 0.0
+        if matched_terms:
+            relevance_score += min(0.42, len(matched_terms) * 0.12)
+        if set(affected_aliases).intersection(wake_entity_aliases):
+            relevance_score += 0.4
+        if diff["stats"]["added"] + diff["stats"]["removed"] + diff["stats"]["changed"] > 0:
+            relevance_score += 0.12
+        if diff["stats"]["document_fields_changed"] > 0:
+            relevance_score += 0.08
+        relevance_score = round(clamp(relevance_score, 0.0, 1.0), 2)
+        if relevance_score < 0.18 and not applies_to_all:
+            continue
+
+        crowding_delta = _topic_diff_crowding_delta(diff)
+        stance_shift = _topic_diff_stance_shift(diff)
+        change_magnitude = round(
+            clamp(
+                (
+                    diff["stats"]["added"]
+                    + diff["stats"]["removed"]
+                    + diff["stats"]["changed"]
+                    + diff["stats"]["document_fields_changed"]
+                )
+                / 6,
+                0.0,
+                1.0,
+            ),
+            2,
+        )
+        risk_flags = _topic_diff_risk_flags(
+            diff=diff,
+            crowding_delta=crowding_delta,
+            stance_shift=stance_shift,
+            applies_to_all=applies_to_all,
+        )
+        decision_hint = "monitor"
+        if "consensus_crowding_up" in risk_flags and set(affected_aliases).intersection(wake_entity_aliases):
+            decision_hint = "shadow_watch"
+        elif "stance_deteriorated" in risk_flags or "principle_updated" in risk_flags:
+            decision_hint = "promotion_gate"
+        elif "stance_improved" in risk_flags and "consensus_crowding_up" not in risk_flags:
+            decision_hint = "supportive"
+
+        signals.append(
+            {
+                "topic_key": topic_key,
+                "title": diff["title"],
+                "summary": diff["summary"],
+                "takeaways": list(diff.get("takeaways", [])),
+                "from_version": diff["stats"]["from_version"],
+                "to_version": diff["stats"]["to_version"],
+                "relevance_score": relevance_score,
+                "change_magnitude": change_magnitude,
+                "crowding_delta": crowding_delta,
+                "stance_shift": stance_shift,
+                "matched_macro_terms": matched_terms,
+                "affected_entities": affected_entities,
+                "entity_aliases": affected_aliases,
+                "applies_to_all": applies_to_all,
+                "risk_flags": risk_flags,
+                "decision_hint": decision_hint,
+            }
+        )
+
+    signals.sort(
+        key=lambda item: (
+            item["relevance_score"],
+            item["change_magnitude"],
+            abs(item["crowding_delta"]) + abs(item["stance_shift"]),
+        ),
+        reverse=True,
+    )
+    return signals[:limit]
+
+
+def summarize_topic_version_signals(signals: list[dict[str, Any]]) -> str | None:
+    if not signals:
+        return None
+    parts: list[str] = []
+    for item in signals[:3]:
+        flags = ",".join(item.get("risk_flags", [])) or "monitor"
+        parts.append(
+            f"{item['topic_key']} v{item['from_version']}->{item['to_version']} {flags} r={item['relevance_score']:.2f}"
+        )
+    return "topic_version_diff=" + "; ".join(parts)
 
 
 def _region_compatible(slice_region: str, market: str) -> bool:
@@ -1132,11 +1321,13 @@ def build_knowledge_context(
     run_id: str,
     macro_theme: str,
     market: str,
+    documents: list[KnowledgeDocument] | None = None,
     slices: list[KnowledgeSlice],
     policy: KnowledgeWeightPolicy,
     wake_entity_ids: list[str] | None = None,
 ) -> KnowledgeContextRecord:
     wake_entity_ids = wake_entity_ids or []
+    documents = documents or []
     macro_items = query_knowledge_slices(
         slices=slices,
         market=market,
@@ -1166,11 +1357,21 @@ def build_knowledge_context(
     macro_signal = _build_macro_insight(macro_items)
     consensus_signal = _build_consensus_insight(consensus_items, policy)
     principle_signal = _build_principle_insight(principle_items, policy)
+    topic_version_signals = build_topic_version_signals(
+        documents=documents,
+        slices=slices,
+        macro_theme=macro_theme,
+        region=market,
+        wake_entity_ids=wake_entity_ids,
+    )
+    topic_version_summary = summarize_topic_version_signals(topic_version_signals)
     summary = (
         f"Knowledge overlay macro={macro_signal.score:.2f}/{macro_signal.confidence:.2f}, "
         f"consensus={consensus_signal.score:.2f}/{consensus_signal.confidence:.2f}, "
         f"principle={principle_signal.score:.2f}/{principle_signal.confidence:.2f}."
     )
+    if topic_version_summary:
+        summary = f"{summary} {topic_version_summary}."
     return KnowledgeContextRecord(
         context_id=make_id("kb_ctx"),
         run_id=run_id,
@@ -1181,6 +1382,8 @@ def build_knowledge_context(
         consensus_signal=consensus_signal,
         principle_signal=principle_signal,
         overall_summary=summary,
+        topic_version_signals=topic_version_signals,
+        topic_version_summary=topic_version_summary,
     )
 
 
