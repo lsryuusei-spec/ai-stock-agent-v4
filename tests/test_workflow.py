@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+import io
 import os
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+from ai_stock_agent.cli import cmd_ingest_knowledge_library
 from ai_stock_agent.models import Bucket, DataProviderConfig, EntityProfile
 from ai_stock_agent.data_adapters import DataSourceManager
 from ai_stock_agent.dashboard import (
@@ -24,6 +26,7 @@ from ai_stock_agent.knowledge_base import (
     build_knowledge_context,
     default_knowledge_policy,
     ingest_knowledge_payload,
+    load_pdf_knowledge_payloads,
     load_knowledge_document_payloads,
     prepare_notebooklm_documents,
     query_knowledge_slices,
@@ -2026,6 +2029,87 @@ class WorkflowTestCase(unittest.TestCase):
         )
         self.assertEqual(len(payloads), 2)
         self.assertEqual(payloads[0]["title"], "Macro note")
+
+    def test_load_pdf_knowledge_payloads_scans_directory_and_infers_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "投资参考2025"
+            root.mkdir()
+            first_pdf = root / "AI算力_2026-04-01.pdf"
+            second_pdf = root / "消费复苏专题.pdf"
+            first_pdf.write_bytes(b"%PDF-1.4")
+            second_pdf.write_bytes(b"%PDF-1.4")
+            with patch(
+                "ai_stock_agent.knowledge_base._extract_pdf_text",
+                side_effect=[
+                    "China policy support is improving and AI infrastructure remains strategic.",
+                    "Consumption recovery is uneven but improving with policy support.",
+                ],
+            ):
+                payloads = load_pdf_knowledge_payloads(
+                    str(root),
+                    region="cn",
+                    source_name="investment_library",
+                    max_pages=10,
+                    max_chars=2000,
+                )
+        self.assertEqual(len(payloads), 2)
+        self.assertEqual(payloads[0]["source_type"], "pdf_library")
+        self.assertEqual(payloads[0]["published_at"], "2026-04-01T00:00:00Z")
+        self.assertIn("pdf", payloads[0]["tags"])
+        self.assertIn("investment_reference", payloads[0]["tags"])
+        self.assertEqual(payloads[0]["relative_path"], "AI算力_2026-04-01.pdf")
+        self.assertTrue(payloads[0]["topic_key"].startswith("cn_"))
+        self.assertTrue(payloads[0]["content"])
+
+    def test_extract_pdf_text_falls_back_to_ocr_when_native_text_is_too_short(self) -> None:
+        pdf_path = Path("dummy.pdf")
+        with patch(
+            "ai_stock_agent.knowledge_base._extract_pdf_text_native",
+            return_value="short text",
+        ), patch(
+            "ai_stock_agent.knowledge_base._extract_pdf_text_ocr",
+            return_value="This is a much longer OCR extraction with usable portfolio research context.",
+        ):
+            from ai_stock_agent.knowledge_base import _extract_pdf_text
+
+            content = _extract_pdf_text(
+                pdf_path,
+                max_pages=8,
+                max_chars=4000,
+                enable_ocr=True,
+                ocr_min_chars=100,
+            )
+        self.assertIn("much longer OCR extraction", content)
+
+    def test_cli_can_ingest_pdf_library_documents(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "投资参考2024"
+            root.mkdir()
+            pdf_path = root / "半导体周期_2026-03-15.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4")
+            db_path = str(Path(tmpdir) / "agent.db")
+            with patch(
+                "ai_stock_agent.knowledge_base._extract_pdf_text",
+                return_value=(
+                    "China policy support is improving. Current market consensus is crowded around semiconductors. "
+                    "My investment principle is to wait for a better margin of safety."
+                ),
+            ):
+                with patch("sys.stdout", new=io.StringIO()):
+                    cmd_ingest_knowledge_library(
+                        db_path,
+                        str(root),
+                        "cn",
+                        "investment_library",
+                        None,
+                        20,
+                        5000,
+                        False,
+                        240,
+                    )
+            snapshot = build_dashboard_snapshot(db_path, market="cn", status="all")
+            self.assertTrue(snapshot["knowledge_documents"])
+            self.assertTrue(snapshot["knowledge_slices"])
 
     def test_prepare_notebooklm_documents_produces_layered_batch(self) -> None:
         documents = prepare_notebooklm_documents(

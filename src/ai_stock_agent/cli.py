@@ -11,6 +11,7 @@ from .dashboard import serve_dashboard
 from .knowledge_base import (
     default_knowledge_policy,
     ingest_knowledge_payload,
+    load_pdf_knowledge_payloads,
     load_knowledge_document_payloads,
     load_knowledge_document_payload,
     load_text_payload,
@@ -27,6 +28,7 @@ from .web_research import load_web_provider_configs
 
 
 DEFAULT_DB = Path("data/agent.db")
+DEFAULT_KNOWLEDGE_LIBRARY_ROOT = Path(r"D:\知识库_投资")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,6 +86,15 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument("--payload", required=True, help="Path to JSON payload or inline JSON string")
     batch_ingest_parser = subparsers.add_parser("ingest-knowledge-batch", help="Ingest multiple knowledge articles from a JSON array, {documents: []}, or directory")
     batch_ingest_parser.add_argument("--payload", required=True, help="Path to JSON payload array/object, directory, or inline JSON string")
+    library_ingest_parser = subparsers.add_parser("ingest-knowledge-library", help="Recursively ingest PDF knowledge documents from a local library root")
+    library_ingest_parser.add_argument("--root", default=str(DEFAULT_KNOWLEDGE_LIBRARY_ROOT), help="Knowledge library root directory or a single PDF path")
+    library_ingest_parser.add_argument("--region", default="cn")
+    library_ingest_parser.add_argument("--source-name", default="investment_library")
+    library_ingest_parser.add_argument("--limit", type=int, help="Optional maximum number of PDFs to ingest")
+    library_ingest_parser.add_argument("--max-pages", type=int, default=40, help="Maximum pages to extract from each PDF")
+    library_ingest_parser.add_argument("--max-chars", type=int, default=30000, help="Maximum characters to extract from each PDF")
+    library_ingest_parser.add_argument("--disable-ocr", action="store_true", help="Disable OCR fallback for scanned/image-heavy PDFs")
+    library_ingest_parser.add_argument("--ocr-min-chars", type=int, default=240, help="Run OCR when native extraction returns fewer than this many characters")
     show_knowledge_parser = subparsers.add_parser("show-knowledge", help="Display stored knowledge documents, slices, collections, and policy")
     show_knowledge_parser.add_argument("--market", default="cn")
     show_knowledge_parser.add_argument("--layer", choices=["macro", "consensus", "principle"])
@@ -467,6 +478,47 @@ def cmd_ingest_knowledge_batch(db_path: str, payload: str) -> None:
     print(json.dumps(records, indent=2, ensure_ascii=False))
 
 
+def cmd_ingest_knowledge_library(
+    db_path: str,
+    root: str,
+    region: str,
+    source_name: str,
+    limit: int | None,
+    max_pages: int,
+    max_chars: int,
+    disable_ocr: bool,
+    ocr_min_chars: int,
+) -> None:
+    store = SQLiteStateStore(db_path)
+    records: list[dict] = []
+    for item in load_pdf_knowledge_payloads(
+        root,
+        region=region,
+        source_name=source_name,
+        limit=limit,
+        max_pages=max_pages,
+        max_chars=max_chars,
+        enable_ocr=not disable_ocr,
+        ocr_min_chars=ocr_min_chars,
+    ):
+        document, slices, collections = ingest_knowledge_payload(item)
+        document, slices, collections = _persist_knowledge_ingest(store, document, slices, collections)
+        records.append(
+            {
+                "document_id": document.document_id,
+                "title": document.title,
+                "topic_key": document.topic_key,
+                "version": document.version,
+                "slice_count": len(slices),
+                "collection_count": len(collections),
+                "status": "existing" if not slices and not collections else "ingested",
+                "relative_path": item.get("relative_path"),
+                "source_path": item.get("source_path"),
+            }
+        )
+    print(json.dumps(records, indent=2, ensure_ascii=False))
+
+
 def cmd_show_knowledge(
     db_path: str,
     market: str,
@@ -598,6 +650,18 @@ def main() -> None:
         cmd_ingest_knowledge(args.db, args.payload)
     elif args.command == "ingest-knowledge-batch":
         cmd_ingest_knowledge_batch(args.db, args.payload)
+    elif args.command == "ingest-knowledge-library":
+        cmd_ingest_knowledge_library(
+            args.db,
+            args.root,
+            args.region,
+            args.source_name,
+            args.limit,
+            args.max_pages,
+            args.max_chars,
+            args.disable_ocr,
+            args.ocr_min_chars,
+        )
     elif args.command == "show-knowledge":
         cmd_show_knowledge(
             args.db,

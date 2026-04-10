@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from functools import lru_cache
+from io import BytesIO
 import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+import warnings
 
 from .models import (
     KnowledgeCollectionRecord,
@@ -224,6 +227,267 @@ def load_text_payload(payload_or_path: str) -> str:
     if path.exists():
         return path.read_text(encoding="utf-8-sig")
     return payload_or_path
+
+
+def _discover_pdf_files(path_or_root: str) -> list[Path]:
+    path = Path(path_or_root)
+    if not path.exists():
+        raise FileNotFoundError(f"knowledge library path not found: {path}")
+    if path.is_file():
+        if path.suffix.lower() != ".pdf":
+            raise ValueError("knowledge library file input must be a PDF")
+        return [path]
+    return sorted(
+        item
+        for item in path.rglob("*.pdf")
+        if item.is_file() and not item.name.startswith("~$")
+    )
+
+
+def _relative_pdf_path(path: Path, root: Path) -> Path:
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        return Path(path.name)
+
+
+def _infer_pdf_title(path: Path) -> str:
+    title = path.stem.replace("电子版本", "").strip()
+    title = title.strip("《》").strip()
+    return title or path.stem
+
+
+def _infer_pdf_published_at(path: Path) -> str | None:
+    candidates = [path.stem, *path.parts]
+    patterns = (
+        re.compile(r"(?P<year>20\d{2})[-_.年](?P<month>\d{1,2})[-_.月](?P<day>\d{1,2})"),
+        re.compile(r"(?P<year>20\d{2})(?P<month>\d{2})(?P<day>\d{2})"),
+    )
+    for candidate in candidates:
+        for pattern in patterns:
+            match = pattern.search(candidate)
+            if match is None:
+                continue
+            year = int(match.group("year"))
+            month = int(match.group("month"))
+            day = int(match.group("day"))
+            try:
+                return datetime(year, month, day, tzinfo=UTC).isoformat().replace("+00:00", "Z")
+            except ValueError:
+                continue
+    return None
+
+
+def _infer_pdf_tags(relative_path: Path, root: Path) -> list[str]:
+    tags = {"pdf", "investment_library"}
+    path_parts = []
+    if root.name:
+        path_parts.append(root.name)
+    path_parts.extend(relative_path.parts[:-1])
+    for part in path_parts:
+        normalized = normalize_topic_key(part)
+        if normalized:
+            tags.add(normalized)
+    if any("投资参考" in part for part in path_parts):
+        tags.add("investment_reference")
+    return sorted(tags)
+
+
+@lru_cache(maxsize=1)
+def _ocr_engine():
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError as exc:  # pragma: no cover - exercised in runtime environments
+        raise RuntimeError(
+            "OCR fallback requires rapidocr_onnxruntime. Install project dependencies to enable scanned PDF ingest."
+        ) from exc
+    return RapidOCR()
+
+
+def _extract_pdf_text_native(path: Path, *, max_pages: int | None, max_chars: int | None) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:  # pragma: no cover - exercised in runtime environments
+        raise RuntimeError(
+            "PDF ingest requires pypdf. Install project dependencies or run `pip install pypdf`."
+        ) from exc
+
+    reader = PdfReader(str(path))
+    chunks: list[str] = []
+    consumed = 0
+    for index, page in enumerate(reader.pages):
+        if max_pages is not None and index >= max_pages:
+            break
+        try:
+            raw_text = page.extract_text() or ""
+        except Exception:
+            continue
+        normalized = normalize_document_text(raw_text)
+        if not normalized:
+            continue
+        if max_chars is not None:
+            remaining = max_chars - consumed
+            if remaining <= 0:
+                break
+            normalized = normalized[:remaining]
+        if normalized:
+            chunks.append(normalized)
+            consumed += len(normalized)
+    return "\n\n".join(chunks).strip()
+
+
+def _extract_pdf_text_ocr(
+    path: Path,
+    *,
+    max_pages: int | None,
+    max_chars: int | None,
+    dpi: int = 150,
+    max_image_width: int = 2200,
+    min_image_width: int = 1100,
+    tile_height: int = 1600,
+    tile_overlap: int = 140,
+    max_tiles_per_page: int = 4,
+) -> str:
+    try:
+        import fitz
+        import numpy as np
+        from PIL import Image
+    except ImportError as exc:  # pragma: no cover - exercised in runtime environments
+        raise RuntimeError(
+            "OCR fallback requires pymupdf, pillow, and numpy. Install project dependencies to enable scanned PDF ingest."
+        ) from exc
+
+    engine = _ocr_engine()
+    document = fitz.open(path)
+    chunks: list[str] = []
+    consumed = 0
+    try:
+        for index, page in enumerate(document):
+            if max_pages is not None and index >= max_pages:
+                break
+            pixmap = page.get_pixmap(dpi=dpi, alpha=False)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+                image = Image.open(BytesIO(pixmap.tobytes("png"))).convert("RGB")
+            width, height = image.size
+            if width > max_image_width:
+                scale = max_image_width / float(width)
+                resized = (
+                    max(1, int(width * scale)),
+                    max(1, int(height * scale)),
+                )
+                image = image.resize(resized, Image.Resampling.LANCZOS)
+            elif width < min_image_width:
+                scale = min_image_width / float(width)
+                resized = (
+                    max(1, int(width * scale)),
+                    max(1, int(height * scale)),
+                )
+                image = image.resize(resized, Image.Resampling.LANCZOS)
+
+            page_lines: list[str] = []
+            step = max(1, tile_height - tile_overlap)
+            tile_count = 0
+            for top in range(0, image.height, step):
+                if tile_count >= max_tiles_per_page:
+                    break
+                bottom = min(image.height, top + tile_height)
+                tile = image.crop((0, top, image.width, bottom))
+                try:
+                    result, _ = engine(np.array(tile))
+                except Exception:
+                    continue
+                tile_count += 1
+                if not result:
+                    continue
+                for item in result:
+                    if len(item) <= 1:
+                        continue
+                    line = str(item[1]).strip()
+                    if not line:
+                        continue
+                    if page_lines and page_lines[-1] == line:
+                        continue
+                    page_lines.append(line)
+            if not page_lines:
+                continue
+            page_text = "\n".join(page_lines)
+            normalized = normalize_document_text(page_text)
+            if not normalized:
+                continue
+            if max_chars is not None:
+                remaining = max_chars - consumed
+                if remaining <= 0:
+                    break
+                normalized = normalized[:remaining]
+            if normalized:
+                chunks.append(normalized)
+                consumed += len(normalized)
+    finally:
+        document.close()
+    return "\n\n".join(chunks).strip()
+
+
+def _extract_pdf_text(
+    path: Path,
+    *,
+    max_pages: int | None,
+    max_chars: int | None,
+    enable_ocr: bool = True,
+    ocr_min_chars: int = 240,
+) -> str:
+    direct_text = _extract_pdf_text_native(path, max_pages=max_pages, max_chars=max_chars)
+    if not enable_ocr or len(direct_text) >= ocr_min_chars:
+        return direct_text
+    try:
+        ocr_text = _extract_pdf_text_ocr(path, max_pages=max_pages, max_chars=max_chars)
+    except RuntimeError:
+        return direct_text
+    return ocr_text if len(ocr_text) > len(direct_text) else direct_text
+
+
+def load_pdf_knowledge_payloads(
+    path_or_root: str,
+    *,
+    region: str = "cn",
+    source_name: str = "investment_library",
+    source_type: str = "pdf_library",
+    max_pages: int | None = 40,
+    max_chars: int | None = 30000,
+    limit: int | None = None,
+    enable_ocr: bool = True,
+    ocr_min_chars: int = 240,
+) -> list[dict[str, Any]]:
+    files = _discover_pdf_files(path_or_root)
+    root = Path(path_or_root) if Path(path_or_root).is_dir() else Path(path_or_root).parent
+    payloads: list[dict[str, Any]] = []
+    for path in files[:limit] if limit is not None else files:
+        relative_path = _relative_pdf_path(path, root)
+        content = _extract_pdf_text(
+            path,
+            max_pages=max_pages,
+            max_chars=max_chars,
+            enable_ocr=enable_ocr,
+            ocr_min_chars=ocr_min_chars,
+        )
+        if not content:
+            continue
+        payloads.append(
+            {
+                "title": _infer_pdf_title(path),
+                "topic_key": normalize_topic_key(f"{region}_{relative_path.with_suffix('').as_posix()}"),
+                "source_name": source_name,
+                "source_type": source_type,
+                "region": region,
+                "document_type": "pdf_document",
+                "published_at": _infer_pdf_published_at(path),
+                "tags": _infer_pdf_tags(relative_path, root),
+                "content": content,
+                "source_path": str(path),
+                "relative_path": relative_path.as_posix(),
+            }
+        )
+    return payloads
 
 
 def normalize_document_text(text: str) -> str:
