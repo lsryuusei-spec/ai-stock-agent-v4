@@ -436,6 +436,92 @@ class KnowledgeContextRecord(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class KnowledgeClaim(BaseModel):
+    claim_id: str
+    claim_type: str
+    statement: str
+    normalized_statement: str
+    layer: str
+    scope_market: str = "cn"
+    scope_sectors: list[str] = Field(default_factory=list)
+    scope_entities: list[str] = Field(default_factory=list)
+    topic_keys: list[str] = Field(default_factory=list)
+    source_document_ids: list[str] = Field(default_factory=list)
+    source_slice_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    importance: float = Field(default=0.5, ge=0, le=1)
+    novelty: float = Field(default=0.0, ge=0, le=1)
+    evidence_count: int = Field(default=0, ge=0)
+    contradiction_count: int = Field(default=0, ge=0)
+    status: str = "active"
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ClaimEvidenceLink(BaseModel):
+    link_id: str
+    claim_id: str
+    document_id: str | None = None
+    slice_id: str | None = None
+    support_type: str = "support"
+    strength: float = Field(default=0.5, ge=0, le=1)
+    note: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class DecisionRule(BaseModel):
+    rule_id: str
+    rule_pack_id: str | None = None
+    name: str
+    rule_family: str
+    description: str
+    scope_market: str = "cn"
+    scope_sectors: list[str] = Field(default_factory=list)
+    scope_entities: list[str] = Field(default_factory=list)
+    linked_claim_ids: list[str] = Field(default_factory=list)
+    trigger_expression: str
+    action_expression: str
+    base_weight: float = Field(default=0.0, ge=-100, le=100)
+    priority: int = 100
+    blocking: bool = False
+    enabled: bool = True
+    status: str = "active"
+    explanation_template: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class RulePack(BaseModel):
+    pack_id: str
+    name: str
+    market: str = "cn"
+    description: str
+    version: int = 1
+    enabled: bool = True
+    rule_ids: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class RuleSignal(BaseModel):
+    signal_id: str
+    run_id: str
+    entity_id: str | None = None
+    rule_id: str
+    claim_ids: list[str] = Field(default_factory=list)
+    signal_family: str
+    triggered: bool = True
+    blocking: bool = False
+    weight_applied: float = 0.0
+    score_delta: float = 0.0
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    reason: str
+    supporting_evidence_ids: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class EvidenceChannelConfidence(BaseModel):
     channel: str
     confidence_score: float = Field(ge=0, le=1)

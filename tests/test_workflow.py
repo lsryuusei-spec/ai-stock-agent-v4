@@ -10,7 +10,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ai_stock_agent.cli import cmd_ingest_knowledge_library
-from ai_stock_agent.models import Bucket, DataProviderConfig, EntityProfile
+from ai_stock_agent.models import (
+    Bucket,
+    ClaimEvidenceLink,
+    DataProviderConfig,
+    DecisionRule,
+    EntityProfile,
+    KnowledgeClaim,
+    RulePack,
+    RuleSignal,
+)
 from ai_stock_agent.data_adapters import DataSourceManager
 from ai_stock_agent.dashboard import (
     bootstrap_demo_action,
@@ -2729,6 +2738,91 @@ class WorkflowTestCase(unittest.TestCase):
             self.assertGreaterEqual(len(store.list_knowledge_slices()), 1)
             self.assertGreaterEqual(len(store.list_knowledge_collections()), 1)
             self.assertEqual(len(store.list_knowledge_policies()), 1)
+
+    def test_claim_and_rule_records_persist_in_store(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = str(Path(tmpdir) / "agent.db")
+            store = SQLiteStateStore(db_path)
+            claim = KnowledgeClaim(
+                claim_id="claim_valuation_crowding",
+                claim_type="principle",
+                statement="High valuation plus crowded consensus should reduce chase appetite.",
+                normalized_statement="high valuation crowded consensus reduce chase appetite",
+                layer="principle",
+                scope_market="cn",
+                scope_sectors=["semiconductor"],
+                scope_entities=["688981.SH"],
+                topic_keys=["cn_semiconductor_crowding"],
+                source_document_ids=["kb_doc_1"],
+                source_slice_ids=["kb_slice_1"],
+                confidence=0.82,
+                importance=0.91,
+                novelty=0.18,
+                evidence_count=3,
+            )
+            link = ClaimEvidenceLink(
+                link_id="claim_link_1",
+                claim_id=claim.claim_id,
+                document_id="kb_doc_1",
+                slice_id="kb_slice_1",
+                support_type="support",
+                strength=0.88,
+                note="Repeated in Q&A and valuation notes.",
+            )
+            rule = DecisionRule(
+                rule_id="rule_crowding_gate",
+                rule_pack_id="pack_cn_core",
+                name="Crowded valuation chase gate",
+                rule_family="hard_gate",
+                description="Block promotion when valuation is expensive and crowding is high.",
+                scope_market="cn",
+                scope_sectors=["semiconductor"],
+                scope_entities=["688981.SH"],
+                linked_claim_ids=[claim.claim_id],
+                trigger_expression="valuation_score < 62 and consensus_crowding >= 0.7",
+                action_expression="block_promotion('crowding_valuation_gate')",
+                base_weight=8.0,
+                priority=10,
+                blocking=True,
+                explanation_template="High valuation and crowding block promotion.",
+            )
+            pack = RulePack(
+                pack_id="pack_cn_core",
+                name="CN Core Rule Pack",
+                market="cn",
+                description="Baseline CN valuation and crowding controls.",
+                version=1,
+                rule_ids=[rule.rule_id],
+            )
+            signal = RuleSignal(
+                signal_id="rule_signal_1",
+                run_id="run_1",
+                entity_id="688981.SH",
+                rule_id=rule.rule_id,
+                claim_ids=[claim.claim_id],
+                signal_family="hard_gate",
+                triggered=True,
+                blocking=True,
+                weight_applied=rule.base_weight,
+                score_delta=-4.0,
+                confidence=0.79,
+                reason="Crowded consensus plus expensive valuation.",
+                supporting_evidence_ids=[link.link_id],
+            )
+
+            store.save_knowledge_claim(claim)
+            store.save_claim_evidence_link(link)
+            store.save_decision_rule(rule)
+            store.save_rule_pack(pack)
+            store.save_rule_signal(signal)
+
+            self.assertEqual(len(store.list_knowledge_claims()), 1)
+            self.assertEqual(len(store.list_claim_evidence_links()), 1)
+            self.assertEqual(len(store.list_decision_rules()), 1)
+            self.assertEqual(len(store.list_rule_packs()), 1)
+            self.assertEqual(len(store.list_rule_signals()), 1)
+            self.assertEqual(store.list_decision_rules()[0].linked_claim_ids, [claim.claim_id])
+            self.assertTrue(store.list_rule_signals()[0].blocking)
 
     def test_workflow_persists_knowledge_context_overlay(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

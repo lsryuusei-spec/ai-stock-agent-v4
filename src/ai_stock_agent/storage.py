@@ -11,14 +11,17 @@ from pydantic import BaseModel
 from .models import (
     ArchiveVersionRecord,
     AuditTrailRecord,
+    ClaimEvidenceLink,
     CompanyHistoryFold,
     CompanyStateRecord,
     DataSourceHealthRecord,
+    DecisionRule,
     EvidenceFusionSummary,
     EvaluationMetricsRecord,
     ExecutionRecoveryRecord,
     FactorRegistryItem,
     KnowledgeCollectionRecord,
+    KnowledgeClaim,
     KnowledgeContextRecord,
     KnowledgeDocument,
     KnowledgeSlice,
@@ -29,6 +32,8 @@ from .models import (
     PostMortemReport,
     PrescreenDecision,
     ResearchPoolState,
+    RulePack,
+    RuleSignal,
     RunState,
     WebResearchRecord,
     ThemeDecomposition,
@@ -152,6 +157,26 @@ class SQLiteStateStore:
                 );
                 CREATE TABLE IF NOT EXISTS knowledge_context_record (
                     context_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS knowledge_claim (
+                    claim_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS claim_evidence_link (
+                    link_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS decision_rule (
+                    rule_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS rule_pack (
+                    pack_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS rule_signal (
+                    signal_id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL
                 );
                 """
@@ -388,3 +413,43 @@ class SQLiteStateStore:
         with closing(self._connect()) as conn:
             rows = conn.execute("SELECT payload FROM knowledge_context_record ORDER BY context_id").fetchall()
         return [KnowledgeContextRecord.model_validate(json.loads(row["payload"])) for row in rows]
+
+    def save_knowledge_claim(self, item: KnowledgeClaim) -> None:
+        self._upsert_model("knowledge_claim", "claim_id", item.claim_id, item)
+
+    def list_knowledge_claims(self) -> list[KnowledgeClaim]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute("SELECT payload FROM knowledge_claim ORDER BY claim_id").fetchall()
+        return [KnowledgeClaim.model_validate(json.loads(row["payload"])) for row in rows]
+
+    def save_claim_evidence_link(self, item: ClaimEvidenceLink) -> None:
+        self._upsert_model("claim_evidence_link", "link_id", item.link_id, item)
+
+    def list_claim_evidence_links(self) -> list[ClaimEvidenceLink]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute("SELECT payload FROM claim_evidence_link ORDER BY link_id").fetchall()
+        return [ClaimEvidenceLink.model_validate(json.loads(row["payload"])) for row in rows]
+
+    def save_decision_rule(self, item: DecisionRule) -> None:
+        self._upsert_model("decision_rule", "rule_id", item.rule_id, item)
+
+    def list_decision_rules(self) -> list[DecisionRule]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute("SELECT payload FROM decision_rule ORDER BY rule_id").fetchall()
+        return [DecisionRule.model_validate(json.loads(row["payload"])) for row in rows]
+
+    def save_rule_pack(self, item: RulePack) -> None:
+        self._upsert_model("rule_pack", "pack_id", item.pack_id, item)
+
+    def list_rule_packs(self) -> list[RulePack]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute("SELECT payload FROM rule_pack ORDER BY pack_id").fetchall()
+        return [RulePack.model_validate(json.loads(row["payload"])) for row in rows]
+
+    def save_rule_signal(self, item: RuleSignal) -> None:
+        self._upsert_model("rule_signal", "signal_id", item.signal_id, item)
+
+    def list_rule_signals(self) -> list[RuleSignal]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute("SELECT payload FROM rule_signal ORDER BY signal_id").fetchall()
+        return [RuleSignal.model_validate(json.loads(row["payload"])) for row in rows]
