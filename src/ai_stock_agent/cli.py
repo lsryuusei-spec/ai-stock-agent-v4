@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -111,8 +112,12 @@ def build_parser() -> argparse.ArgumentParser:
     prep_parser.add_argument("--region", default="cn")
     prep_parser.add_argument("--published-at")
     gui_parser = subparsers.add_parser("serve-gui", help="Launch a lightweight local web console for the agent")
-    gui_parser.add_argument("--host", default="127.0.0.1")
-    gui_parser.add_argument("--port", type=int, default=8765)
+    gui_parser.add_argument("--host", default=os.environ.get("AI_STOCK_AGENT_HOST", "0.0.0.0"))
+    gui_parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("AI_STOCK_AGENT_PORT", os.environ.get("PORT", "8765"))),
+    )
     override_parser = subparsers.add_parser("manual-override", help="Apply a minimal manual override")
     override_parser.add_argument("--entity-id", required=True)
     override_parser.add_argument("--pool-id")

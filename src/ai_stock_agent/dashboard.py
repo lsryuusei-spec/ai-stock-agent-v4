@@ -1320,8 +1320,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path == "/":
+        if parsed.path in {"/", "/dashboard", "/index.html"}:
             self._html_response(HTML_PAGE)
+            return
+        if parsed.path == "/health":
+            self._json_response(
+                {
+                    "status": "ok",
+                    "db_path": self.db_path,
+                }
+            )
+            return
+        if parsed.path == "/favicon.ico":
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
             return
         if parsed.path == "/api/snapshot":
             params = parse_qs(parsed.query)

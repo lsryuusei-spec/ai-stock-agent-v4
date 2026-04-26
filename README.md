@@ -23,6 +23,21 @@ python -m ai_stock_agent.cli show-postmortem
 python -m ai_stock_agent.cli --db data/generated_cn.db build-universe --market cn --builder-config config/universe_builder.cn.file.json --universe-id cn_generated_live --pool-id cn_generated_live_pool
 ```
 
+## Codespaces GUI
+
+The lightweight workbench is served by the `serve-gui` command. In Codespaces, bind it to `0.0.0.0` so the forwarded port can reach the server:
+
+```bash
+python -m ai_stock_agent.cli --db data/agent.db serve-gui --host 0.0.0.0 --port 8765
+```
+
+This repo includes a `.devcontainer` setup that installs the package, seeds `data/agent.db`, starts the dashboard on port `8765`, and asks Codespaces to forward that port automatically.
+
+Useful dashboard URLs:
+- `/` or `/dashboard`: browser workbench
+- `/health`: JSON health check
+- `/api/snapshot`: dashboard data endpoint
+
 ## Data Provider Modes
 
 - `mock`: built-in synthetic data for development and workflow validation
